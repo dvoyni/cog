@@ -7,4 +7,5 @@ require (
 	github.com/dvoyni/cog/plugins/platform v0.0.0
 	github.com/dvoyni/cog/plugins/sfx v0.0.0
 	github.com/ebitengine/oto/v3 v3.5.1
+	golang.org/x/sys v0.47.0
 )

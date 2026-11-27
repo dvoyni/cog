@@ -30,8 +30,26 @@ type otoDevice struct {
 	player *oto.Player
 }
 
+// probe asks the machine whether it has an output device, until the
+// process's context exists, and answers nothing after: that context was
+// created on a machine that had a device, and a device gone since is a
+// loss, which otosound promises to stay silent on.
+func (d *otoDevice) probe() error {
+	contextMutex.Lock()
+	created := processContext != nil
+	contextMutex.Unlock()
+	if created {
+		return nil
+	}
+	return probeOutputDevice()
+}
+
 // open takes the process's context once one exists, and creates it at
-// sampleRate and bufferSize otherwise: stereo float32, named PluginName.
+// sampleRate and bufferSize otherwise: stereo float32, named PluginName. The
+// first kernel's settings win, answered in force to every kernel after,
+// whose device goroutine logs the ones it asked for as ignored. That holds by
+// construction, here, since no test reaches oto's real context: a test would
+// open a real device, and spend the process's one context.
 func (d *otoDevice) open(sampleRate int, bufferSize time.Duration) (deviceSettings, error) {
 	contextMutex.Lock()
 	defer contextMutex.Unlock()
@@ -63,7 +81,7 @@ func (d *otoDevice) open(sampleRate int, bufferSize time.Duration) (deviceSettin
 // queue the mixer is pulled into, the buffer size at the rate in force.
 func (d *otoDevice) play(source io.Reader) error {
 	if d.sharedContext == nil || d.player != nil {
-		panic("otosound: a player is started once, after the context is open")
+		panic("otosound: a player is started after the context is open, while none plays")
 	}
 	<-d.sharedContext.ready
 	if err := d.sharedContext.context.Err(); err != nil {
@@ -77,9 +95,23 @@ func (d *otoDevice) play(source io.Reader) error {
 	return nil
 }
 
+// poll answers the context's error, which only ever joins, and then this
+// kernel's player's. It is called only while the player plays, and panics
+// otherwise.
+func (d *otoDevice) poll() error {
+	if d.player == nil {
+		panic("otosound: a device is polled only while its player plays")
+	}
+	if err := d.sharedContext.context.Err(); err != nil {
+		return err
+	}
+	return d.player.Err()
+}
+
 // close stops the player with PauseAndStopReading, not Pause: Pause keeps
 // reading the source so that playback can resume without a gap, and
-// PauseAndStopReading returns only once a read in progress has finished.
+// PauseAndStopReading returns only once a read in progress has finished,
+// which is the barrier detaching the handoff ring after a loss needs.
 func (d *otoDevice) close() {
 	if d.player == nil {
 		return

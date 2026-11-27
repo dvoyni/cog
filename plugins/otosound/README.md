@@ -10,9 +10,14 @@ Status: being built: the plugin and its `Config`, the device opened at sfx's
 silence, the `Device` ready once it plays, and the player closed in
 `Destroy`; and the handoff ring, each flush's changes published to it by
 `Emit` and drained whole at a block start, a full ring merging into the
-staging changes, and a destroyed clip held until the mixer has passed it.
-Decoding, the mixer's voices, streaming, and the device's probe, retry and
-reports are designed, not yet built. The design is in
+staging changes, and a destroyed clip held until the mixer has passed it;
+and the device's probe, retry and reports: on Windows a machine with no
+output device is asked about before the open, a device that could not be
+taken is logged once as a warning and retried every `DeviceRetry`, an open
+device is polled for loss as often, a lost one is reported never, and a
+later kernel's ignored `SampleRate` or `BufferSize` is logged once as an
+error. Decoding, the mixer's voices and streaming are designed, not yet
+built. The design is in
 [`docs/design.md`](docs/design.md), and the build on the
 [sfx map](https://github.com/dvoyni/cog/issues/945).
 
@@ -35,7 +40,7 @@ reports are designed, not yet built. The design is in
 - **Sockets it declares:** none.
 - **Sockets it binds:** `sfx.BackendSocket`, exclusive and not optional, with
   a private backend over the plugin, never the plugin itself: its `Voices`,
-  which sfx calls from its `Start`, sizes the handoff ring and then opens the
-  device and starts this kernel's player; its `Emit` publishes each flush's
+  which sfx calls from its `Start`, sizes the handoff ring and then takes the
+  device and starts this kernel's player on its device goroutine; its `Emit` publishes each flush's
   changes to the mixer, never waiting on it; its `Device` answers the device as it is now, with one atomic
   load.

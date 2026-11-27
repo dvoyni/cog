@@ -30,10 +30,15 @@ type handoffRing struct {
 	published atomic.Uint64
 	applied   atomic.Uint64
 
-	// pulled is whether a mixer has drained the ring. Until one has, no device
-	// thread exists to be mid-copy out of anything, so the flush side lets a
+	// pulled is whether a player pulls the ring: set by the device goroutine
+	// once this kernel's player plays, and cleared by it once a lost device's
+	// player has stopped; nothing else writes it. While it is not set, no device thread
+	// exists to be mid-copy out of anything, so the flush side lets a
 	// destroyed clip go at once rather than hold it against a counter nothing
-	// moves.
+	// moves, and discards the staging changes a full ring left rather than
+	// merge into them: sfx restates every live voice when the device turns
+	// ready, so nothing is lost, and they can neither grow without bound nor
+	// keep released clips alive.
 	pulled atomic.Bool
 }
 
@@ -88,9 +93,6 @@ func (r *handoffRing) publish() {
 // were ordered and stay ordered. It touches the ring through its atomics
 // alone, and allocates nothing.
 func (r *handoffRing) drain(apply func(*operation)) {
-	if !r.pulled.Load() {
-		r.pulled.Store(true)
-	}
 	published := r.published.Load()
 	applied := r.applied.Load()
 	if applied == published {

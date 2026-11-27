@@ -20,14 +20,16 @@
 // metronome.ManualClock: the harness's handler of it schedules the records
 // queued since, then sfx's Tasks.Flush with the beat's Delta plus its Lost, as
 // a game schedules it. Endings answers every VoiceEndedEvent published so
-// far, in order, and Reports every error the kernel logged.
+// far, in order, Reports every error the kernel logged, and Warnings every
+// warning.
 //
 // The harness is strict: an error the kernel logs fails the test, checked
 // after each Step and when the test ends, unless a match the test gave
 // ExpectError answers true of it, such as a clip's failure it causes on
 // purpose. UseBackend, before Spawn, binds a backend of the test's own in
 // place of the headless one, for what the headless backend never does: a
-// prepare answering done=false, or a device that is not ready.
+// prepare answering done=false, or a device that is not ready. Configure,
+// before Spawn, gives a plugin among the test's its config.
 //
 // A test asserts against sfx's flush-computed state and its events, never
 // against samples and never below the seam: above it, on a fixed step,

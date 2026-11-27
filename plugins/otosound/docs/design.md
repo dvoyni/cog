@@ -21,7 +21,10 @@ Status: being built. The plugin, its `Config`, and an open device playing
 silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965),
 and the handoff ring with the releases held behind its applied counter, from
 [otosound: the handoff ring](https://github.com/dvoyni/cog/issues/967), its
-changes drained by a mixer that still plays silence; the rest is designed, not yet built. v1's otosound, which this ports, was
+changes drained by a mixer that still plays silence; and the Windows probe,
+the retry, the poll for loss and the device reports, from
+[otosound: the Windows probe, the retry, loss and device reports](https://github.com/dvoyni/cog/issues/966);
+the rest is designed, not yet built. v1's otosound, which this ports, was
 built and tested on v1's kernel.
 
 ## Problem Statement
@@ -278,7 +281,7 @@ Both build at `CGO_ENABLED=0` for `windows/amd64`, `darwin/arm64` and `linux/amd
 **Opening it, and never failing the game:**
 
 - **At `Voices(n)` otosound takes the device,** in one step: it asks whether the machine has an output device (see *Absence is asked about*) and, if it does, takes the process's context or creates it. The step is synchronous and cheap, since creating a context does not wait for the device, and it settles the rate the mixer produces and every clip is converted to. Settling it here is what keeps a clip from ever being prepared against a rate that is not the device's: the only case where the two differ is a later kernel, whose context already exists, so the answer is there at once. If the take fails, the rate the config asked for stands.
-- **The device goroutine, one per kernel, does the rest.** When the take failed, it first retries it every `DeviceRetry` (see *Loss, the retry, and what it can recover*). Once it holds a context, it starts the player: it waits on the context's ready channel, checks `Context.Err`, makes a player over the mixer, gives it its buffer, starts it, and stores the `Device` as ready. oto takes the context's buffer as a duration and the player's as bytes, and both are said: the context sizes the device's buffer, and the player sizes the queue the mixer is pulled into, `BufferSize` at the rate in force, eight bytes a frame.
+- **The device goroutine, one per kernel, does the rest.** When the take failed, it first retries it every `DeviceRetry` (see *Loss, the retry, and what it can recover*). Once it holds a context, it starts the player: it waits on the context's ready channel, checks `Context.Err`, makes a player over the mixer, gives it its buffer, starts it, marks the handoff ring pulled (see *The handoff ring*), and stores the `Device` as ready. oto takes the context's buffer as a duration and the player's as bytes, and both are said: the context sizes the device's buffer, and the player sizes the queue the mixer is pulled into, `BufferSize` at the rate in force, eight bytes a frame.
 - **A ready `Device`** answers `Ready`, the name `"otosound"`, the rate in force, two channels, and as its `Latency` the length of the context's output buffer in force, which is all oto offers. Until it is ready, it answers not ready, named `"otosound"`.
 - **`Device()` is a field read:** one atomic pointer load and a copy, cheap enough for sfx to poll every flush. The device side writes it and the flush side reads it. It changes under its reader with no notice, which is correct, because loss is silent.
 - **A device that cannot be opened** is a warning, logged once (see *Reports*), after which otosound behaves exactly as the headless backend does: it accepts everything, plays nothing, and the game runs. It goes on retrying (see *Loss, the retry, and what it can recover*).
@@ -394,6 +397,7 @@ block start -> atomic load -> apply every pending slot's changes, in order, each
 
 - A full ring means the device thread has not run for `RingDepth` flushes: a stalled or dying device, whose `Ready` is very likely already false.
 - The flush side owns the staging changes, which are not published. When the ring is full, the publish publishes nothing, and the next `Emit` merges into staging instead: starts and stops append, and an update folds into the last start or update standing for its slot. That is the same coalescing sfx performs within a flush, widened over the flushes the merge covers, so it adds no new semantics. Since staging is unpublished, the merge touches nothing the mixer can be reading.
+- **While no player pulls the ring,** before this kernel's player first plays or after a lost device's ring is detached, the next `Emit` discards the staging changes a full ring left instead of merging into them. sfx restates every live voice as a start when the device turns ready, so nothing is lost, and the staging changes can neither grow without bound nor keep released clips alive. The device goroutine marks the ring pulled once the player plays and before it stores the `Device` as ready, so a flush that sees the device ready, and restates its voices, never has them discarded for a mixer that has not drained its first block yet.
 - **Rejected:** dropping the oldest flush's changes, which loses exactly the starts the contract promises to keep; blocking until the mixer drains, which makes a dead device stall the game; a seqlock, since the reader retries, and a retry in a device callback is a spin whose bound is the writer's schedule.
 
 **There is no tearing, only latency:**

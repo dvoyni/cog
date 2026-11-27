@@ -17,22 +17,23 @@ type backend struct {
 }
 
 // Voices sizes the handoff ring for n slots, an n of zero or less taken as
-// one, and only then opens the device and starts this kernel's player over
-// the mixer, which drains the ring and plays silence: the mixer must exist
-// complete before anything can pull a block out of it. It takes the
-// process's oto context, or creates it, synchronously, since that does not
-// wait for the device; the player is started on the device goroutine, which
-// waits for the context to be ready and then sets the Device ready, at the
-// rate and buffer size in force. It never blocks or fails the game: a device
-// that cannot be opened, or whose player cannot start, leaves the Device not
-// ready.
+// one, and only then starts the device goroutine, which starts this kernel's
+// player over the mixer, which drains the ring and plays silence: the mixer
+// must exist complete before anything can pull a block out of it. It takes
+// the device synchronously, since that does not wait for it and settles the
+// settings in force: it asks the machine whether it has an output device
+// and, if it does, takes the process's oto context or creates it. A retry
+// on the device goroutine never moves the rate settled here, since the rate
+// is the context's, fixed when it was created. The player is started on the device
+// goroutine, which waits for the context to be ready and then sets the
+// Device ready, at the rate and buffer size in force. It never blocks or
+// fails the game: a device that cannot be taken, or whose player cannot
+// start, leaves the Device not ready, is logged once as a warning, and is
+// retried every Config.DeviceRetry.
 func (b backend) Voices(n int) {
 	b.plugin.mixer.ring = newHandoffRing(b.plugin.config.RingDepth, max(n, 1))
-	settings, err := b.plugin.device.open(b.plugin.config.SampleRate, b.plugin.config.BufferSize)
-	if err != nil {
-		return
-	}
-	b.plugin.deviceGoroutine.Go(func() { b.startPlayer(settings) })
+	settings, err := b.plugin.deviceGoroutine.take()
+	b.plugin.deviceGoroutine.start(settings, err)
 }
 
 // Emit copies one flush's changes, which are sfx's and valid only for the
@@ -45,7 +46,8 @@ func (b backend) Voices(n int) {
 // the voice that had just replaced it.
 //
 // It then publishes the staging changes onto the handoff ring, or, when the
-// ring is full, leaves them for the next Emit to merge into, and lets go of
+// ring is full, leaves them for the next Emit to merge into, or to discard
+// while no player pulls the ring, and lets go of
 // every destroyed clip the mixer has passed. It never waits on the mixer. It
 // is called only after Voices, and panics before.
 func (b backend) Emit(changes *sfx.FlushChanges) {
@@ -54,8 +56,16 @@ func (b backend) Emit(changes *sfx.FlushChanges) {
 		panic("otosound: Emit was called before Voices")
 	}
 	staging := ring.staging
-	// Staging changes left over hold what a full ring did not take, so this
-	// Emit merges into them: the one case in which an update coalesces.
+	// Staging changes left over hold what a full ring did not take. While no
+	// player pulls the ring, this Emit discards them: sfx restates every live
+	// voice when the device turns ready, so nothing is lost. Otherwise it
+	// merges into them: the one case in which an update coalesces.
+	// Cleared before truncated, so no discarded clip stays alive in the
+	// spare capacity.
+	if !ring.pulled.Load() {
+		clear(staging.operations)
+		staging.operations = staging.operations[:0]
+	}
 	merging := len(staging.operations) > 0
 	for _, slot := range changes.Stops {
 		staging.record(operation{kind: operationKindStop, slot: slot}, merging)
@@ -117,20 +127,4 @@ func (b backend) TakePrepared() []sfx.Prepared { return nil }
 // made, and sfx installs nothing else.
 func (b backend) Install(clip sfx.PreparedClip) (sfx.ClipID, error) {
 	return 0, errNotOurClip
-}
-
-// startPlayer starts this kernel's player over the mixer and, once it plays,
-// sets the Device ready at settings. It runs on the device goroutine, since
-// the player waits for the context to be ready.
-func (b backend) startPlayer(settings deviceSettings) {
-	if err := b.plugin.device.play(&b.plugin.mixer); err != nil {
-		return
-	}
-	b.plugin.status.Store(&sfx.Device{
-		Ready:      true,
-		Name:       string(PluginName),
-		SampleRate: settings.sampleRate,
-		Channels:   outputChannels,
-		Latency:    settings.bufferSize,
-	})
 }
