@@ -11,7 +11,7 @@
 //	var voice sfx.Voice
 //	h.Record(func(queue sfx.Queue) { voice = queue.Play("shot.ogg", 0, sfx.VoiceOptions{}) })
 //	h.Step()
-//	h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes) {
+//	h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener) {
 //		entry, live := voices.Info(voice)
 //		...
 //	})

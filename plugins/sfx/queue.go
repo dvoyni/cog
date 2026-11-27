@@ -66,7 +66,7 @@ func (q queue) Stop(voice Voice) {
 // It is coalesced, not ordered: set twice before one flush, the last value
 // wins, applied where the flush's ordered operations end, so the flush that
 // applies a pause advances no playhead. It reaches the backend as a
-// VoiceParams.Paused update of every live voice.
+// VoiceParams.Paused update of every live voice whose pause it changes.
 func (q queue) SetPaused(paused bool) { q.state.paused = m.Some(paused) }
 
 // SetBus records bus's linear volume, 1 being unity, which the flush folds
@@ -85,6 +85,16 @@ func (q queue) SetBus(bus Bus, volume float32) {
 // one recorded after it is not. A bus outside Config.MaxBuses is Master.
 func (q queue) StopBus(bus Bus) {
 	q.state.operations = append(q.state.operations, operation{kind: operationStopBus, bus: bus.resolve(len(q.state.busVolumeSets))})
+}
+
+// SetListener records where the game is heard from: each field options
+// states moves the listener, and an absent one leaves it as it is. It is
+// coalesced field by field, the last value recorded before a flush winning,
+// so a job that moves the listener and one that turns it do not overwrite
+// each other. Every positional voice the listener moved relative to is
+// restated to the backend at that flush, with no operation naming it.
+func (q queue) SetListener(options ListenerOptions) {
+	q.state.listener = q.state.listener.merge(options)
 }
 
 // mintVoice answers the next handle: a free slot's next generation, or, at a
@@ -109,6 +119,8 @@ type queueState struct {
 	// paused is the pause SetPaused recorded last since the last flush,
 	// absent when it recorded none.
 	paused m.Maybe[bool]
+	// listener is every SetListener recorded since the last flush, merged.
+	listener ListenerOptions
 	// generations is each slot's current generation, starting at 0 so the
 	// first handle a slot hands out is generation 1.
 	generations []uint32

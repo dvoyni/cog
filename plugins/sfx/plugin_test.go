@@ -58,14 +58,16 @@ func play(h *sfxtest.Harness) sfx.Voice {
 func readLiveVoice(h *sfxtest.Harness, voice sfx.Voice) (sfx.VoiceEntry, bool) {
 	var entry sfx.VoiceEntry
 	var live bool
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) { entry, live = voices.Info(voice) })
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, _ sfx.Listener) {
+		entry, live = voices.Info(voice)
+	})
 	return entry, live
 }
 
 // readLiveCount answers how many voices the view holds.
 func readLiveCount(h *sfxtest.Harness) int {
 	var count int
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) { count = voices.Len() })
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, _ sfx.Listener) { count = voices.Len() })
 	return count
 }
 
@@ -335,7 +337,7 @@ func TestTheViewHoldsEveryLiveVoiceWithItsPath(t *testing.T) {
 	})
 	h.Step()
 
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) {
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, _ sfx.Listener) {
 		var held []sfx.Voice
 		for entry := range voices.All() {
 			if entry.Path != clipPath {

@@ -33,12 +33,15 @@ func playOn(h *sfxtest.Harness, bus sfx.Bus) sfx.Voice {
 // into.
 func readBusVolume(h *sfxtest.Harness, bus sfx.Bus) float32 {
 	var volume float32
-	h.Read(func(_ sfx.LiveVoices, _ sfx.ClipTable, buses sfx.BusVolumes) { volume = buses.Volume(bus) })
+	h.Read(func(_ sfx.LiveVoices, _ sfx.ClipTable, buses sfx.BusVolumes, _ sfx.Listener) {
+		volume = buses.Volume(bus)
+	})
 	return volume
 }
 
 // stereoGains answers the gain matrix of the stereo fixture heard centred at
-// audibility: its own diagonal, scaled.
+// audibility: its own diagonal, scaled, which isSameMatrix compares within
+// gainTolerance.
 func stereoGains(audibility float32) [2][2]float32 {
 	return [2][2]float32{{audibility, 0}, {0, audibility}}
 }
@@ -80,7 +83,7 @@ func TestABusVolumeFallsOnItsOwnVoicesAndNoOthers(t *testing.T) {
 	if len(changes.Updates) != 1 || changes.Updates[0].Slot != 0 {
 		t.Fatalf("the slider produced the updates %+v, want one for the music's slot 0", changes.Updates)
 	}
-	if got := changes.Updates[0].Params.Gains; got != stereoGains(0.5) {
+	if got := changes.Updates[0].Params.Gains; !isSameMatrix(got, stereoGains(0.5)) {
 		t.Fatalf("the update carries gains %v, want the bus folded in at 0.5", got)
 	}
 }
@@ -115,7 +118,7 @@ func TestABusVolumeIsReadableAndCoalescedWithinOneFlush(t *testing.T) {
 	if entry, _ := readLiveVoice(h, voice); entry.Audibility != 0.3 {
 		t.Fatalf("the voice is audible at %v, want the last value the flush recorded", entry.Audibility)
 	}
-	if got := seam.emitted()[1].Updates; len(got) != 1 || got[0].Params.Gains != stereoGains(0.3) {
+	if got := seam.emitted()[1].Updates; len(got) != 1 || !isSameMatrix(got[0].Params.Gains, stereoGains(0.3)) {
 		t.Fatalf("three values in one flush produced the updates %+v, want one at 0.3", got)
 	}
 
@@ -139,7 +142,7 @@ func TestAVoiceStartsAtItsBusVolume(t *testing.T) {
 	playOn(h, busMusic)
 
 	changes := seam.emitted()[1]
-	if len(changes.Starts) != 1 || changes.Starts[0].Params.Gains != stereoGains(0.25) || len(changes.Updates) != 0 {
+	if len(changes.Starts) != 1 || !isSameMatrix(changes.Starts[0].Params.Gains, stereoGains(0.25)) || len(changes.Updates) != 0 {
 		t.Fatalf("the play emitted the starts %+v and %d updates, want one start at 0.25 and no update", changes.Starts, len(changes.Updates))
 	}
 }

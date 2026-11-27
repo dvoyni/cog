@@ -3,6 +3,8 @@ package sfx
 import (
 	"iter"
 	"time"
+
+	"github.com/dvoyni/cog/libs/m"
 )
 
 // liveVoices is what LiveVoices names: a fixed table of slots, one per voice
@@ -24,14 +26,14 @@ func (v liveVoices) Info(voice Voice) (VoiceEntry, bool) {
 	if slot == nil {
 		return VoiceEntry{}, false
 	}
-	return VoiceEntry{Voice: slot.voice, Path: slot.path, Bus: slot.bus, Playhead: slot.playhead, Duration: slot.duration, Audibility: slot.busGain, Paused: slot.suspended(v.table.paused)}, true
+	return slot.makeVoiceEntry(v.table.paused), true
 }
 
 // All yields every live voice, in slot order.
 func (v liveVoices) All() iter.Seq[VoiceEntry] {
 	return func(yield func(VoiceEntry) bool) {
 		for index := range v.table.slots {
-			if slot := &v.table.slots[index]; slot.state.live() && !yield(VoiceEntry{Voice: slot.voice, Path: slot.path, Bus: slot.bus, Playhead: slot.playhead, Duration: slot.duration, Audibility: slot.busGain, Paused: slot.suspended(v.table.paused)}) {
+			if slot := &v.table.slots[index]; slot.state.live() && !yield(slot.makeVoiceEntry(v.table.paused)) {
 				return
 			}
 		}
@@ -109,22 +111,6 @@ func (v liveVoices) stopBus(bus Bus, endings *[]VoiceEndedEvent) {
 	}
 }
 
-// setPaused applies the pause of every voice, or its end. A change owes
-// every voice the backend holds an update, since that is all the pause is at
-// the seam: at most MaxVoices updates, with no verb of its own. A voice
-// started in this flush is owed none, its start carrying the pause.
-func (v liveVoices) setPaused(paused bool) {
-	if v.table.paused == paused {
-		return
-	}
-	v.table.paused = paused
-	for index := range v.table.slots {
-		if slot := &v.table.slots[index]; slot.state == slotSounding {
-			slot.owesUpdate = true
-		}
-	}
-}
-
 // resolve binds each voice waiting on a clip that clips now holds ready, and
 // ends with ReasonFailed each whose clip has failed, unless its play was
 // applied in this flush: a failure ends a voice one or more flushes after its
@@ -168,45 +154,56 @@ func (v liveVoices) advance(delta time.Duration, endings *[]VoiceEndedEvent) {
 	}
 }
 
-// collect folds each live voice's bus volume from buses into its gain, and
-// fills changes from the table: a start for every voice started in this
-// flush, an update for every voice the backend holds whose fold moved or
-// whose pause changed, and a stop for every voice that ended while the
-// backend held it, emptying the slots of the stopped. The fold is the whole
-// of what a bus is: sfx decides the volume here, above the seam, and no bus
-// reaches the backend. A SetBus costs at most MaxVoices updates, and a fold
-// that did not move is no change, so it costs none. A voice played and ended
-// inside one flush appears in neither the starts nor the stops: it was never
-// audible, so there is nothing to start and nothing to stop.
-func (v liveVoices) collect(changes *FlushChanges, buses busVolumes) {
+// computeParams computes every live voice's params, the whole of how it
+// sounds, from what the flush has applied: the W3C equations against the one
+// listener, heardFrom, give its distance, its falloff and cone and the
+// panning of its azimuth; buses gives its bus's volume, folded into its
+// audibility and so into its gains; and the pause of every voice, beside its
+// own, gives whether it is paused. The listener moving, a bus's volume and
+// the pause each change voices no operation names, which is why they are
+// computed in one pass of their own, and why the params alone say whether
+// the backend is owed an update. No bus reaches the backend: sfx decides the
+// volume here, above the seam.
+func (v liveVoices) computeParams(heardFrom listener, buses busVolumes) {
+	front, up := heardFrom.resolveAxes()
+	for index := range v.table.slots {
+		if slot := &v.table.slots[index]; slot.state.live() {
+			slot.computeParams(heardFrom.position, front, up, buses.volumes[slot.bus], v.table.paused)
+		}
+	}
+}
+
+// collect fills changes from the table: a start for every voice started in
+// this flush, carrying its params, an update for every voice the backend
+// holds whose params differ from those the backend last had of it, and a stop
+// for every voice that ended while the backend held it, emptying the slots of
+// the stopped. Comparing the params is the one test of whether a voice is
+// restated, whatever moved them: a SetBus, a listener's move or a pause costs
+// at most MaxVoices updates, and a voice whose params came out the same, at
+// a bus volume it already had, a listener it did not move relative to or a
+// pause it was already under, costs none. A voice played and ended inside one
+// flush appears in none: it was never audible, so there is nothing to start
+// and nothing to stop.
+func (v liveVoices) collect(changes *FlushChanges) {
 	for index := range v.table.slots {
 		slot := &v.table.slots[index]
-		moved := false
-		if slot.state.live() {
-			gain := buses.volumes[slot.bus]
-			moved = gain != slot.busGain
-			slot.busGain = gain
-		}
 		switch slot.state {
 		case slotStopping:
 			changes.Stops = append(changes.Stops, VoiceSlot(index))
 			*slot = tableSlot{}
 		case slotStarting:
-			params := makeCentredVoiceParams(slot.channels, slot.busGain)
-			params.Paused = slot.suspended(v.table.paused)
 			changes.Starts = append(changes.Starts, VoiceStart{
 				Slot:   VoiceSlot(index),
 				Clip:   slot.clipID,
 				Offset: slot.offset,
-				Params: params,
+				Params: slot.params,
 			})
+			slot.heldParams = slot.params
 			slot.state = slotSounding
 		case slotSounding:
-			if moved || slot.owesUpdate {
-				params := makeCentredVoiceParams(slot.channels, slot.busGain)
-				params.Paused = slot.suspended(v.table.paused)
-				changes.Updates = append(changes.Updates, VoiceUpdate{Slot: VoiceSlot(index), Params: params})
-				slot.owesUpdate = false
+			if slot.params != slot.heldParams {
+				changes.Updates = append(changes.Updates, VoiceUpdate{Slot: VoiceSlot(index), Params: slot.params})
+				slot.heldParams = slot.params
 			}
 		}
 	}
@@ -283,22 +280,72 @@ type tableSlot struct {
 	voice           Voice
 	path            string
 	bus             Bus
-	// busGain is the volume of the voice's bus as of the last fold, zero on a
-	// slot the fold has not reached yet.
-	busGain float32
 	// offset is where in the clip the voice begins, and playhead where it is.
 	offset   time.Duration
 	playhead time.Duration
 	// options is how the voice was played.
 	options VoiceOptions
-	// owesUpdate is whether the backend holds the voice and its params moved
-	// in the flush running, so it is owed a VoiceUpdate.
-	owesUpdate bool
 	// clipID, duration and channels are the clip's, zero while the voice
 	// waits on it.
 	clipID   ClipID
 	duration time.Duration
 	channels int
+	// distance is how far the voice is from the listener, zero on a
+	// non-positional voice, and audibility the scalar it is heard at before
+	// panning, its falloff, its cone and its bus's volume, as of the last
+	// computeParams pass.
+	distance   float32
+	audibility float32
+	// params is how the voice sounds as of the last computeParams pass, and
+	// heldParams the params the backend last had of it, so a voice whose
+	// params did not move is not restated.
+	params     VoiceParams
+	heldParams VoiceParams
+}
+
+// makeVoiceEntry answers the slot's voice as LiveVoices shows it, under the
+// pause of every voice, paused.
+func (s *tableSlot) makeVoiceEntry(paused bool) VoiceEntry {
+	return VoiceEntry{
+		Voice:      s.voice,
+		Path:       s.path,
+		Bus:        s.bus,
+		Playhead:   s.playhead,
+		Duration:   s.duration,
+		Paused:     s.suspended(paused),
+		Audibility: s.audibility,
+		Distance:   s.distance,
+	}
+}
+
+// computeParams computes the slot's distance, audibility and params as heard
+// by a listener at listenerAt whose axes are front and up, on a bus at
+// busVolume, under the pause of every voice, paused. A voice with no position
+// is non-positional: no falloff, no cone, and the panning of azimuth 0, which
+// is "heard centred" as a place on the circle rather than a second rule. A
+// positional voice is as loud as its falloff and, when it has a facing, its
+// cone say. Its audibility is that times its bus's volume, and the
+// equal-power matrix of its azimuth is scaled by it.
+func (s *tableSlot) computeParams(listenerAt, front, up m.Vec3, busVolume float32, paused bool) {
+	azimuth := 0.0
+	gain := 1.0
+	s.distance = 0
+	if position, positional := s.options.Position.Get(); positional {
+		s.distance = position.Distance(listenerAt)
+		gain = computeDistanceGain(s.options.Falloff.Or(Falloff{}).resolve(), float64(s.distance))
+		if orientation, facing := s.options.Orientation.Get(); facing {
+			gain *= computeConeGain(s.options.Cone.Or(Cone{}).resolve(), position, orientation.Rotate(m.Vec3{Z: -1}), listenerAt)
+		}
+		azimuth, _ = computeAzimuthElevation(position, listenerAt, front, up)
+	}
+	s.audibility = float32(gain) * busVolume
+	gains := computeEqualPowerGains(azimuth, s.channels >= 2)
+	for source := range gains {
+		for output := range gains[source] {
+			gains[source][output] *= s.audibility
+		}
+	}
+	s.params = VoiceParams{Gains: gains, Rate: 1, Paused: s.suspended(paused)}
 }
 
 // suspended answers whether the voice's playhead is stopped: by its own

@@ -72,9 +72,12 @@ func TestAPauseSuspendsEveryVoiceAndResumesItOnTheSameSample(t *testing.T) {
 	}
 }
 
-// The pause is one update per live voice, at most MaxVoices of them, and no
-// verb: a SuspendAll at the seam would be a second way to say what the
-// flush's changes already say, and two ways to say one thing can disagree.
+// The pause is one update per live voice it suspends, at most MaxVoices of
+// them, and no verb: a SuspendAll at the seam would be a second way to say
+// what the flush's changes already say, and two ways to say one thing can
+// disagree. A voice the game already paused itself has params the pause does
+// not change, so it is not restated, as a voice at a bus volume it already
+// had is not.
 //
 // A voice's own VoiceOptions.Paused is what the game itself said, and it
 // survives the pause untouched: ending the pause must not unpause the voice a
@@ -93,13 +96,10 @@ func TestAPauseIsAnUpdatePerLiveVoiceAndLeavesWhatTheGameSaid(t *testing.T) {
 	h.Step()
 
 	setPaused(h, true)
-	wantOnlyUpdates(t, seam.emitted()[1], true, 0, 1, 2)
+	wantOnlyUpdates(t, seam.emitted()[1], true, 1, 2)
 
 	setPaused(h, false)
-	changes := seam.emitted()[2]
-	if len(changes.Updates) != len(voices) || !changes.Updates[0].Params.Paused || changes.Updates[1].Params.Paused {
-		t.Fatalf("the end of the pause updated %+v, want every live voice, the game's own paused one still paused", changes.Updates)
-	}
+	wantOnlyUpdates(t, seam.emitted()[2], false, 1, 2)
 	own, _ := readLiveVoice(h, voices[0])
 	if !own.Paused || own.Playhead != 0 {
 		t.Fatalf("the voice the game paused itself reads %+v after the pause came and went, want it paused at the head", own)

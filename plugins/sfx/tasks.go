@@ -13,17 +13,20 @@ import (
 // is mid-append while the queue is drained, and no reader sees half a flush's
 // voices. In order, it installs the prepares the backend finished since the
 // last flush; applies the operations recorded, a clip named for the first
-// time read and prepared there, and then the bus volumes they coalesced to
-// and the pause recorded last; binds the voices waiting on a clip that is now
+// time read and prepared there, and then the bus volumes, the listener and
+// the pause they coalesced to; binds the voices waiting on a clip that is now
 // ready and ends those whose clip failed; advances every playhead by delta;
-// folds each voice's bus volume into its gains; hands the backend the flush's
-// changes; frees the slots whose voices ended, only now that their stops are
+// computes every live voice's params, the W3C equations against the listener,
+// its bus's volume and the pause; hands the backend the flush's changes,
+// restating a voice only when its params differ from those the backend
+// holds; frees the slots whose voices ended, only now that their stops are
 // handed over, for the next flush's plays; and publishes each ending.
-func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], busesHandle kernel.Write[BusVolumes], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
+func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], busesHandle kernel.Write[BusVolumes], listenerHandle kernel.Write[Listener], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
 	queue := queueHandle.Get()
 	voices := voicesHandle.Get()
 	clips := clipsHandle.Get()
 	buses := busesHandle.Get()
+	heardFrom := listenerHandle.Get()
 	state := stateHandle.Get()
 	backend := state.backend.Get()
 	state.changes.reset()
@@ -42,13 +45,17 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	queue.state.operations = queue.state.operations[:0]
 	buses.apply(queue.state.busVolumeSets)
 	clear(queue.state.busVolumeSets)
+	heardFrom.apply(queue.state.listener)
+	listenerHandle.Set(heardFrom)
+	queue.state.listener = ListenerOptions{}
 	if paused, recorded := queue.state.paused.Get(); recorded {
-		voices.setPaused(paused)
+		voices.table.paused = paused
 		queue.state.paused = m.Maybe[bool]{}
 	}
 	voices.resolve(clips, &state.endings)
 	voices.advance(delta, &state.endings)
-	voices.collect(&state.changes, buses)
+	voices.computeParams(heardFrom, buses)
+	voices.collect(&state.changes)
 	backend.Emit(&state.changes)
 	queue.state.freeSlots = voices.appendFreeSlots(queue.state.freeSlots[:0])
 	for _, ending := range state.endings {
