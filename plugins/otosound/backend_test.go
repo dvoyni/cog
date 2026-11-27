@@ -258,7 +258,7 @@ func TestDestroyWaitsForThePreparesInFlight(t *testing.T) {
 // import no package that could, only those its own work needs.
 func TestTheDeviceThreadsFilesImportNothingThatCouldDecode(t *testing.T) {
 	allowed := []string{"encoding/binary", "math", "sync/atomic", "time", "github.com/dvoyni/cog/plugins/sfx"}
-	for _, file := range []string{"mixer.go"} {
+	for _, file := range []string{"mixer.go", "voice.go", "handoffring.go", "changelist.go"} {
 		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
 		if err != nil {
 			t.Fatalf("parsing %s: %v", file, err)

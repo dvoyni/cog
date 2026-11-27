@@ -20,8 +20,9 @@ observes, and no test above the seam can see any of them.
 Status: being built. The plugin, its `Config`, and an open device playing
 silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965),
 and the handoff ring with the releases held behind its applied counter, from
-[otosound: the handoff ring](https://github.com/dvoyni/cog/issues/967), its
-changes drained by a mixer that still plays silence; so is the decoded tier of
+[otosound: the handoff ring](https://github.com/dvoyni/cog/issues/967), and
+the mixer of resident voices, with *Declicking* and *Pause*, from
+[otosound: the mixer](https://github.com/dvoyni/cog/issues/969); so is the decoded tier of
 *Preparing a clip*, with *Loop regions*, from
 [otosound: resident clips decoded in Prepare](https://github.com/dvoyni/cog/issues/968):
 a clip within `DecodedClipLimit` is decoded on a prepare goroutine, held at its
