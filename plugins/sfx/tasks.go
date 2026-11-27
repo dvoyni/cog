@@ -16,10 +16,12 @@ import (
 // time read and prepared there, and then the bus volumes they coalesced to
 // and the pause recorded last; binds the voices waiting on a clip that is now
 // ready and ends those whose clip failed; advances every playhead by delta;
-// folds each voice's bus volume into its gains; hands the backend the flush's
-// changes; frees the slots whose voices ended, only now that their stops are
-// handed over, for the next flush's plays; and publishes each ending.
-func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], busesHandle kernel.Write[BusVolumes], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
+// polls the backend's device into DeviceView; folds each voice's bus volume
+// into its gains; hands the backend the flush's changes, every voice it
+// holds restarted at its playhead when the device has just turned ready;
+// frees the slots whose voices ended, only now that their stops are handed
+// over, for the next flush's plays; and publishes each ending.
+func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], busesHandle kernel.Write[BusVolumes], deviceHandle kernel.Write[DeviceView], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
 	queue := queueHandle.Get()
 	voices := voicesHandle.Get()
 	clips := clipsHandle.Get()
@@ -48,6 +50,12 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	}
 	voices.resolve(clips, &state.endings)
 	voices.advance(delta, &state.endings)
+	wasReady := deviceHandle.Get().device.Ready
+	device := backend.Device()
+	deviceHandle.Set(deviceView{device: device})
+	if device.Ready && !wasReady {
+		voices.restate()
+	}
 	voices.collect(&state.changes, buses)
 	backend.Emit(&state.changes)
 	queue.state.freeSlots = voices.appendFreeSlots(queue.state.freeSlots[:0])

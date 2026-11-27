@@ -18,8 +18,8 @@ const defaultMaxVoices = 64
 const defaultMaxBuses = 32
 
 // Plugin is sfx: it declares the BackendSocket a backend binds, and installs
-// Tasks, the Queue, LiveVoices, the ClipTable and BusVolumes. It subscribes
-// to nothing.
+// Tasks, the Queue, LiveVoices, the ClipTable, BusVolumes and DeviceView. It
+// subscribes to nothing.
 type Plugin struct {
 	// backend is the socket of the bound backend, and maxVoices the cap Init
 	// resolved, for Start to tell the backend how many slots exist.
@@ -52,8 +52,8 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 
 // Init declares the required BackendSocket, so a kernel no backend binds
 // panics in Spawn, and installs the Queue, LiveVoices, the ClipTable,
-// BusVolumes, the flush's private resource and Tasks, Flush registered and
-// scheduled nowhere. A config of another type than *Config, or a negative
+// BusVolumes, DeviceView, the flush's private resource and Tasks, Flush
+// registered and scheduled nowhere. A config of another type than *Config, or a negative
 // MaxVoices or MaxBuses, is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
@@ -70,8 +70,9 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(makeLiveVoices(p.maxVoices))
 	configurator.InitResource(makeClipTable())
 	configurator.InitResource(makeBusVolumes(maxBuses))
+	configurator.InitResource(deviceView{})
 	configurator.InitResource(&flushState{backend: p.backend})
-	configurator.InitResource(Tasks{Flush: configurator.RegisterTask6(flush)})
+	configurator.InitResource(Tasks{Flush: configurator.RegisterTask7(flush)})
 	return nil
 }
 

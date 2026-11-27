@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/dvoyni/cog/kernel"
-	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/platform"
 	"github.com/dvoyni/cog/plugins/sfx"
 	"github.com/dvoyni/cog/plugins/sfx/sfxtest"
@@ -58,14 +57,16 @@ func play(h *sfxtest.Harness) sfx.Voice {
 func readLiveVoice(h *sfxtest.Harness, voice sfx.Voice) (sfx.VoiceEntry, bool) {
 	var entry sfx.VoiceEntry
 	var live bool
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) { entry, live = voices.Info(voice) })
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, _ sfx.DeviceView) {
+		entry, live = voices.Info(voice)
+	})
 	return entry, live
 }
 
 // readLiveCount answers how many voices the view holds.
 func readLiveCount(h *sfxtest.Harness) int {
 	var count int
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) { count = voices.Len() })
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, _ sfx.DeviceView) { count = voices.Len() })
 	return count
 }
 
@@ -78,8 +79,7 @@ func wantEndings(t *testing.T, h *sfxtest.Harness, want ...sfx.VoiceEndedEvent) 
 }
 
 // seamPlugin wraps sfx's BackendSocket, whichever binds it, to keep what
-// crosses the seam: the slot count and a copy of each flush's changes, and
-// to answer seam's device in place of the bound backend's when it holds one.
+// crosses the seam: the slot count and a copy of each flush's changes.
 type seamPlugin struct{ seam *seam }
 
 func (seamPlugin) Name() kernel.PluginName { return "seam" }
@@ -104,8 +104,6 @@ type seam struct {
 	mutex      sync.Mutex
 	slotCounts []int
 	changes    []sfx.FlushChanges
-	// device is what the backend answers for its device, when present.
-	device m.Maybe[sfx.Device]
 }
 
 // emitted answers a copy of each flush's changes so far.
@@ -138,13 +136,6 @@ func (b seamBackend) Emit(changes *sfx.FlushChanges) {
 	})
 	b.seam.mutex.Unlock()
 	b.BackendSocket.Emit(changes)
-}
-
-func (b seamBackend) Device() sfx.Device {
-	if device, present := b.seam.device.Get(); present {
-		return device
-	}
-	return b.BackendSocket.Device()
 }
 
 // The whole vertical path in one test: a game records a play, gets a voice,
@@ -335,7 +326,7 @@ func TestTheViewHoldsEveryLiveVoiceWithItsPath(t *testing.T) {
 	})
 	h.Step()
 
-	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes) {
+	h.Read(func(voices sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, _ sfx.DeviceView) {
 		var held []sfx.Voice
 		for entry := range voices.All() {
 			if entry.Path != clipPath {

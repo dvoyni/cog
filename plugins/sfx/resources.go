@@ -17,7 +17,7 @@ type Tasks struct {
 	// synchronously, at the flush that first names the clip's path: it is the
 	// one place sfx can stall. A prepare the backend finishes later is installed
 	// at the top of a later flush, the voices waiting on it starting there from
-	// their offsets.
+	// their offsets. It polls the backend's device once, into DeviceView.
 	//
 	// sfx schedules it nowhere. A game schedules it on each update beat,
 	// after its recorders, passing the beat's Delta plus its Lost, so the
@@ -58,3 +58,13 @@ type ClipTable = clipTable
 // voice's bus volume into its gains before the flush's changes leave, so a
 // backend never learns a bus exists.
 type BusVolumes = busVolumes
+
+// DeviceView is the resource of the sound device, as of the last flush: read
+// it under kernel.Read[sfx.DeviceView], as a game drawing a prompt to enable
+// sound or a rhythm game reading the latency does. It has no mutators: the
+// flush alone writes it, from the backend's Device, polled once per flush. A
+// device that is absent, not ready yet or lost reads not ready, and is a fact
+// to read rather than an error: a voice's playhead advances whether or not
+// anyone can hear it, and when the device turns ready every live voice is
+// restarted where the world is now. A pause does not change it.
+type DeviceView = deviceView

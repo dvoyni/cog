@@ -2,17 +2,19 @@ package sfx_test
 
 import (
 	"sync"
+	"time"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/sfx"
 )
 
 // fakeBackend is a backend sfx's tests bind through sfxtest's UseBackend, for
-// what the headless backend never does: a prepare answering done=false and
-// finishing at a later flush, or a backend refusing a clip or preparing
-// nothing. It records nothing of what it is handed; a test wraps it with
-// seamPlugin for that. Its fields are set before Spawn, and its counts are
-// guarded, since the test reads what the flush's job wrote.
+// what the headless backend never does: a device that is not ready or that
+// arrives, a prepare answering done=false and finishing at a later flush, or
+// a backend refusing a clip or preparing nothing. It records nothing of what
+// it is handed; a test wraps it with seamPlugin for that. Its fields are set
+// before Spawn, and what changes after it is guarded, since the test writes
+// what the flush's job reads, and reads what it wrote.
 type fakeBackend struct {
 	// prepareErr, when set, is what every Prepare answers instead.
 	prepareErr error
@@ -24,11 +26,13 @@ type fakeBackend struct {
 	preparingNothing bool
 	// installingZero has every Install answer the zero ID.
 	installingZero bool
-	// mutex guards deferred, the tokens of the prepares answered done=false
-	// and not yet finished; completed, what the next TakePrepared answers;
-	// prepareCount, how many prepares were asked for; and installCount, how
-	// many IDs were minted.
+	// mutex guards notReady, whether Device answers a device that is not
+	// ready, set before Spawn or by setReady; deferred, the tokens of the
+	// prepares answered done=false and not yet finished; completed, what the
+	// next TakePrepared answers; prepareCount, how many prepares were asked
+	// for; and installCount, how many IDs were minted.
 	mutex        sync.Mutex
+	notReady     bool
 	deferred     []any
 	completed    []sfx.Prepared
 	prepareCount int
@@ -39,8 +43,13 @@ func (*fakeBackend) Voices(int) {}
 
 func (*fakeBackend) Emit(*sfx.FlushChanges) {}
 
-func (*fakeBackend) Device() sfx.Device {
-	return sfx.Device{Ready: true, Name: "fake", SampleRate: 48000, Channels: 2}
+func (b *fakeBackend) Device() sfx.Device {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if b.notReady {
+		return notReadyFakeDevice
+	}
+	return fakeDevice
 }
 
 func (b *fakeBackend) Prepare(token any, _ []byte) (sfx.PreparedClip, bool, error) {
@@ -77,6 +86,14 @@ func (b *fakeBackend) Install(sfx.PreparedClip) (sfx.ClipID, error) {
 	return sfx.ClipID(b.installCount), nil
 }
 
+// setReady has Device answer fakeDevice, or, when ready is false,
+// notReadyFakeDevice.
+func (b *fakeBackend) setReady(ready bool) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.notReady = !ready
+}
+
 // finishPrepares finishes every prepare answered done=false so far, failed
 // with err when it is not nil, for the next TakePrepared to answer: how a
 // test says the goroutine a backend spawned has finished, without one.
@@ -101,8 +118,15 @@ func (b *fakeBackend) counts() (prepareCount int, installCount uint32) {
 	return b.prepareCount, b.installCount
 }
 
-// fakeClipSeconds is the length of the clip a fakeBackend prepares, which no
-// test plays to its end.
+// fakeDevice is what a fakeBackend's Device answers while it is ready, and
+// notReadyFakeDevice what it answers while it is not: absent, not opened yet
+// or lost, which sfx cannot tell apart, and a game does not need to. Its
+// name tells it from the zero Device sfx holds before its first poll.
+var fakeDevice = sfx.Device{Ready: true, Name: "fake", SampleRate: 48000, Channels: 2, Latency: 10 * time.Millisecond}
+
+var notReadyFakeDevice = sfx.Device{Name: fakeDevice.Name}
+
+// fakeClipSeconds is the length of the clip a fakeBackend prepares.
 const fakeClipSeconds = 4
 
 // fakeClip is the clip a fakeBackend prepares: mono at 48 kHz,

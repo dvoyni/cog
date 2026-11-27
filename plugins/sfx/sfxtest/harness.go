@@ -52,7 +52,7 @@ type Harness struct {
 	memory *filesystems.MemoryFS
 	// reading is what Read hands the views to, set while it waits for its
 	// job.
-	reading func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes)
+	reading func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, device sfx.DeviceView)
 	// mutex guards records, the bodies Record queued for the next step,
 	// which the harness's recording task takes; endings, every
 	// VoiceEndedEvent published; reports, every error logged; and
@@ -164,7 +164,7 @@ func (h *Harness) Reports() []error {
 
 // Read calls read with sfx's views, in a job holding their read locks, and
 // returns once it has, so a test reads what the last step's flush left.
-func (h *Harness) Read(read func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes)) {
+func (h *Harness) Read(read func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, device sfx.DeviceView)) {
 	h.t.Helper()
 	h.reading = read
 	defer func() { h.reading = nil }()
