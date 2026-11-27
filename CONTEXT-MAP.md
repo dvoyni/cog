@@ -25,4 +25,5 @@
 - **Gfx → Render**: render draws through gfx alone, and none of render's users reaches gfx; render's frame event is published inside gfx's draw event, and its recovery, capture and readback events inside gfx's own.
 - **Platform → Render**: render reads every loaded asset through the FileSystem; bytes that are not files reach it through a memory mount.
 - **Platform → Sfx**: sfx reads every clip by its path through the FileSystem; bytes that are not files reach it through a memory mount.
+- **Sfx → Otosound**: otosound binds sfx's backend seam and mixes each flush's changes on a device thread outside the kernel; its words are sfx's, so it keeps no glossary of its own.
 - **Render → Canvas**: canvas draws through render alone and reaches no gfx; its frame event is published inside render's, its entries are sorted and drawn as one command list per camera order among render's, and what canvas needs that render lacks is a delta to render.
