@@ -2,6 +2,10 @@ package sfx
 
 import "strconv"
 
+// ClipID is an opaque handle to a prepared clip, minted by the backend's
+// Install. Zero means none.
+type ClipID uint32
+
 // Voice is an opaque handle to one playing sound. It is comparable, copyable
 // and usable as a map key, and the zero value means no voice.
 //
@@ -21,10 +25,9 @@ func (v Voice) String() string {
 	if v == NoVoice {
 		return "NoVoice"
 	}
-	return "Voice(" + strconv.FormatUint(uint64(uint32(v)), 10) + "v" +
+	return "Voice(" + strconv.FormatUint(uint64(v.index()), 10) + "v" +
 		strconv.FormatUint(uint64(uint32(v>>32)), 10) + ")"
 }
 
-// ClipID is an opaque handle to a prepared clip, minted by the backend's
-// Install. Zero means none.
-type ClipID uint32
+// index answers the slot the handle names, its low 32 bits.
+func (v Voice) index() uint32 { return uint32(v) }

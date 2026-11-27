@@ -18,3 +18,12 @@ type FlushChanges struct {
 	Stops    []VoiceSlot // applied first, before the starts that reuse their slots
 	Destroys []ClipID    // ordered after the stops that precede them
 }
+
+// reset empties the changes for the next flush, keeping their capacity, so a
+// warm flush builds them with no allocation.
+func (c *FlushChanges) reset() {
+	c.Starts = c.Starts[:0]
+	c.Updates = c.Updates[:0]
+	c.Stops = c.Stops[:0]
+	c.Destroys = c.Destroys[:0]
+}
