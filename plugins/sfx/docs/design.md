@@ -18,7 +18,7 @@ the v1 tickets it came from as provenance, and the map's tickets that changed
 it. *Further Notes* ends with every change from v1 and the ticket that decided
 it. The vocabulary is in [`CONTEXT.md`](../CONTEXT.md).
 
-Status: being built. The seam and the headless backend are built, from [sfx: the seam and the headless backend](https://github.com/dvoyni/cog/issues/953), and the plugin playing a clip to its end, its `Queue` with `Play` and `Stop`, `LiveVoices`, `ClipTable`, `Tasks.Flush` and `VoiceEndedEvent`, with sfxtest's core, from [sfx: a clip played to its end](https://github.com/dvoyni/cog/issues/954); the rest is designed, not yet built.
+Status: being built. The seam and the headless backend are built, from [sfx: the seam and the headless backend](https://github.com/dvoyni/cog/issues/953), and the plugin playing a clip to its end, its `Queue` with `Play` and `Stop`, `LiveVoices`, `ClipTable`, `Tasks.Flush` and `VoiceEndedEvent`, with sfxtest's core, from [sfx: a clip played to its end](https://github.com/dvoyni/cog/issues/954); and the buses, `Config.MaxBuses`, `SetBus`, `StopBus` and `BusVolumes`, from [sfx: buses](https://github.com/dvoyni/cog/issues/958); the rest is designed, not yet built.
 
 ## Problem Statement
 

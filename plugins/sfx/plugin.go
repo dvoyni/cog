@@ -14,8 +14,12 @@ const PluginName kernel.PluginName = "sfx"
 // defaultMaxVoices is Config.MaxVoices when it is zero.
 const defaultMaxVoices = 64
 
+// defaultMaxBuses is Config.MaxBuses when it is zero.
+const defaultMaxBuses = 32
+
 // Plugin is sfx: it declares the BackendSocket a backend binds, and installs
-// Tasks, the Queue, LiveVoices and the ClipTable. It subscribes to nothing.
+// Tasks, the Queue, LiveVoices, the ClipTable and BusVolumes. It subscribes
+// to nothing.
 type Plugin struct {
 	// backend is the socket of the bound backend, and maxVoices the cap Init
 	// resolved, for Start to tell the backend how many slots exist.
@@ -28,6 +32,9 @@ type Config struct {
 	// MaxVoices is how many voices may exist at once; zero means 64. A play
 	// that finds every slot taken ends with ReasonStolen.
 	MaxVoices int
+	// MaxBuses is how many buses exist, Master among them; zero means 32. A
+	// bus outside them is Master.
+	MaxBuses int
 }
 
 // NewPlugin returns sfx.
@@ -44,22 +51,27 @@ func (*Plugin) Dependencies() []kernel.PluginName {
 }
 
 // Init declares the required BackendSocket, so a kernel no backend binds
-// panics in Spawn, and installs the Queue, LiveVoices, the ClipTable, the
-// flush's private resource and Tasks, Flush registered and scheduled nowhere.
-// A config of another type than *Config, or a negative MaxVoices, is a
-// composition error, and panics.
+// panics in Spawn, and installs the Queue, LiveVoices, the ClipTable,
+// BusVolumes, the flush's private resource and Tasks, Flush registered and
+// scheduled nowhere. A config of another type than *Config, or a negative
+// MaxVoices or MaxBuses, is a composition error, and panics.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
-	maxVoices := kernel.PluginConfigOrDefault[Config](config).MaxVoices
-	if maxVoices < 0 {
-		panic(fmt.Sprintf("sfx: Config.MaxVoices is %d, and it may not be negative", maxVoices))
+	pluginConfig := kernel.PluginConfigOrDefault[Config](config)
+	if pluginConfig.MaxVoices < 0 {
+		panic(fmt.Sprintf("sfx: Config.MaxVoices is %d, and it may not be negative", pluginConfig.MaxVoices))
 	}
-	p.maxVoices = cmp.Or(maxVoices, defaultMaxVoices)
+	if pluginConfig.MaxBuses < 0 {
+		panic(fmt.Sprintf("sfx: Config.MaxBuses is %d, and it may not be negative", pluginConfig.MaxBuses))
+	}
+	p.maxVoices = cmp.Or(pluginConfig.MaxVoices, defaultMaxVoices)
+	maxBuses := cmp.Or(pluginConfig.MaxBuses, defaultMaxBuses)
 	p.backend = configurator.DeclareExclusiveSocket[BackendSocket](false)
-	configurator.InitResource(makeQueue(p.maxVoices))
+	configurator.InitResource(makeQueue(p.maxVoices, maxBuses))
 	configurator.InitResource(makeLiveVoices(p.maxVoices))
 	configurator.InitResource(makeClipTable())
+	configurator.InitResource(makeBusVolumes(maxBuses))
 	configurator.InitResource(&flushState{backend: p.backend})
-	configurator.InitResource(Tasks{Flush: configurator.RegisterTask5(flush)})
+	configurator.InitResource(Tasks{Flush: configurator.RegisterTask6(flush)})
 	return nil
 }
 
