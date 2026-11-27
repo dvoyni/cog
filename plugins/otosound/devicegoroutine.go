@@ -62,6 +62,11 @@ func (g *deviceGoroutine) run(settings deviceSettings, err error) {
 	for {
 		if err == nil {
 			g.reportIgnoredConfig(settings)
+			// An Emit that read the ring pulled just before a loss detached
+			// it may have published after the detach emptied the ring, so it
+			// is emptied again before a player reads it, and no stale start
+			// reaches the first block after an attach.
+			g.plugin.mixer.ring.empty()
 			err = g.plugin.device.play(&g.plugin.mixer)
 		}
 		if err == nil {
@@ -96,9 +101,9 @@ func (g *deviceGoroutine) take() (deviceSettings, error) {
 
 // attach marks the handoff ring pulled, now that this kernel's player plays,
 // and then sets the Device ready at settings. The order is contract: a flush
-// that sees the Device ready restates every live voice, and a ring not
-// pulled discards what a full ring left in staging, so the ring is pulled
-// before any flush can see the Device ready.
+// that sees the Device ready restates every live voice, and Emit publishes
+// nothing to a ring not pulled, so the ring is pulled before any flush can
+// see the Device ready.
 func (g *deviceGoroutine) attach(settings deviceSettings) {
 	g.plugin.mixer.ring.pulled.Store(true)
 	g.plugin.status.Store(&sfx.Device{
@@ -115,7 +120,9 @@ func (g *deviceGoroutine) attach(settings deviceSettings) {
 // goes not ready first, so the flush sees the loss no later than it sees a
 // release let go; then the player is stopped, which returns only once it
 // has stopped reading the mixer; and only then is the handoff ring detached,
-// which lets the flush side free a destroyed clip at once again. Detaching
+// which lets the flush side free a destroyed clip at once again and stops
+// Emit publishing, and emptied, in the mixer's place, so nothing it holds
+// keeps a clip alive through the loss or reaches the next player. Detaching
 // before the player stopped would claim nothing is mid-copy while something
 // still might be. Without the detach, the applied counter stops with the
 // device, and every release after the loss is held for as long as it lasts.
@@ -123,6 +130,7 @@ func (g *deviceGoroutine) detach() {
 	g.plugin.status.Store(&sfx.Device{Name: string(PluginName)})
 	g.plugin.device.close()
 	g.plugin.mixer.ring.pulled.Store(false)
+	g.plugin.mixer.ring.empty()
 }
 
 // waitForLoss polls the playing device every DeviceRetry, since oto has

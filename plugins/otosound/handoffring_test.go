@@ -83,7 +83,7 @@ func pendingCount(ring *handoffRing) uint64 {
 // and in order rather than coalesced: two flushes' operations taking effect
 // at one instant is correct, since they were ordered and stay ordered.
 func TestEveryFlushsPublishedChangesAreAppliedWholeAndInOrder(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	gains := [2][2]float32{{0.5, 0.5}}
 	for clipID := sfx.ClipID(1); clipID <= 3; clipID++ {
 		b.Emit(&sfx.FlushChanges{
@@ -189,7 +189,7 @@ func TestAMergeCoalescesUpdatesAndKeepsStartsAndStops(t *testing.T) {
 // go, so it does not move before the changes it counts have been applied
 // whole.
 func TestTheAppliedCounterOnlyMovesOnceARingSlotsChangesHaveBeenApplied(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	emitStart(b, 1)
 	if applied := plugin.mixer.ring.applied.Load(); applied != 0 {
 		t.Fatalf("the applied counter is %d before any block", applied)
@@ -210,7 +210,7 @@ func TestTheAppliedCounterOnlyMovesOnceARingSlotsChangesHaveBeenApplied(t *testi
 // the stop lands on the voice it was meant for rather than on the one that
 // replaced it, which it would otherwise fade out before it was heard.
 func TestAStolenSlotIsStoppedBeforeTheStartThatReusesIt(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	b.Emit(&sfx.FlushChanges{
 		Starts: []sfx.VoiceStart{{Slot: 0, Clip: 1}},
 		Stops:  []sfx.VoiceSlot{0},
@@ -226,7 +226,7 @@ func TestAPlayAllocatesNothingInTheBackend(t *testing.T) {
 	if raceEnabled {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	plugin.clips[1] = &fakeClip{}
 	changes := &sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: 1}}}
 	block := make([]byte, 480*bytesPerFrame)
@@ -275,21 +275,22 @@ func TestNoOperationIsLostWhenTheFlushAndTheMixerRunTogether(t *testing.T) {
 	wantStartsInOrder(t, applied, total)
 }
 
-// While no player pulls the ring, before the device's first block or after
-// a lost device, a full ring discards its staging changes rather than merge
-// into them: sfx restates every live voice once the device turns ready, so
-// nothing is lost, and the staging changes neither grow without bound nor
-// keep released clips alive.
-func TestAFullRingThatNoPlayerPullsDiscardsItsStagingChanges(t *testing.T) {
+// While no player pulls the ring, before this kernel's player first plays or
+// after a lost device, Emit publishes nothing, neither into the ring nor into
+// the staging changes: sfx restates every live voice once the device turns
+// ready, so nothing is lost, and a ring nobody drains holds nothing and keeps
+// no clip alive.
+func TestARingNoPlayerPullsHoldsNothing(t *testing.T) {
 	b, plugin := spawnHandoff(t)
-	last := sfx.ClipID(plugin.config.RingDepth + 2)
-	for clipID := sfx.ClipID(1); clipID <= last; clipID++ {
+	for clipID := sfx.ClipID(1); clipID <= sfx.ClipID(plugin.config.RingDepth+2); clipID++ {
 		emitStart(b, clipID)
 	}
 
-	staged := plugin.mixer.ring.staging.operations
-	if len(staged) != 1 || staged[0].clipID != last {
-		t.Fatalf("the staging changes hold %+v, want only the last flush's start: an earlier one was merged rather than discarded", staged)
+	if pending := pendingCount(plugin.mixer.ring); pending != 0 {
+		t.Fatalf("%d flushes' changes were published to a ring no player pulls", pending)
+	}
+	if staged := plugin.mixer.ring.staging.operations; len(staged) != 0 {
+		t.Fatalf("the staging changes hold %+v, want nothing", staged)
 	}
 }
 

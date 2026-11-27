@@ -32,13 +32,11 @@ type handoffRing struct {
 
 	// pulled is whether a player pulls the ring: set by the device goroutine
 	// once this kernel's player plays, and cleared by it once a lost device's
-	// player has stopped; nothing else writes it. While it is not set, no device thread
-	// exists to be mid-copy out of anything, so the flush side lets a
-	// destroyed clip go at once rather than hold it against a counter nothing
-	// moves, and discards the staging changes a full ring left rather than
-	// merge into them: sfx restates every live voice when the device turns
-	// ready, so nothing is lost, and they can neither grow without bound nor
-	// keep released clips alive.
+	// player has stopped; nothing else writes it. While it is not set, no
+	// device thread exists to be mid-copy out of anything, so Emit publishes
+	// nothing and lets every destroyed clip go at once, and a ring nobody
+	// drains holds nothing: sfx restates every live voice as a start when the
+	// device turns ready, so nothing is lost.
 	pulled atomic.Bool
 }
 
@@ -108,4 +106,19 @@ func (r *handoffRing) drain(apply func(*operation)) {
 		}
 	}
 	r.applied.Store(applied)
+}
+
+// empty drops every published change list the mixer has not applied, clearing
+// each so it keeps no clip alive, and stores the applied counter past them.
+// It takes the mixer's place, and is called only on the device goroutine
+// while no player reads the mixer.
+func (r *handoffRing) empty() {
+	published := r.published.Load()
+	depth := uint64(len(r.slots))
+	for applied := r.applied.Load(); applied < published; applied++ {
+		changes := r.slots[applied%depth]
+		clear(changes.operations)
+		changes.operations = changes.operations[:0]
+	}
+	r.applied.Store(published)
 }

@@ -46,26 +46,35 @@ func (b backend) Voices(n int) {
 // the voice that had just replaced it.
 //
 // It then publishes the staging changes onto the handoff ring, or, when the
-// ring is full, leaves them for the next Emit to merge into, or to discard
-// while no player pulls the ring, and lets go of
-// every destroyed clip the mixer has passed. It never waits on the mixer. It
-// is called only after Voices, and panics before.
+// ring is full, leaves them for the next Emit to merge into, and lets go of
+// every destroyed clip the mixer has passed. It never waits on the mixer.
+//
+// While no player pulls the ring, it records and publishes nothing, empties
+// the staging changes a lost device left, and lets go at once of every
+// destroyed clip and every one still held: sfx restates every live voice as
+// a start when the device turns ready, so nothing is lost, and a ring nobody
+// drains holds nothing and keeps no clip alive. It is called only after
+// Voices, and panics before.
 func (b backend) Emit(changes *sfx.FlushChanges) {
 	ring := b.plugin.mixer.ring
 	if ring == nil {
 		panic("otosound: Emit was called before Voices")
 	}
 	staging := ring.staging
-	// Staging changes left over hold what a full ring did not take. While no
-	// player pulls the ring, this Emit discards them: sfx restates every live
-	// voice when the device turns ready, so nothing is lost. Otherwise it
-	// merges into them: the one case in which an update coalesces.
-	// Cleared before truncated, so no discarded clip stays alive in the
-	// spare capacity.
 	if !ring.pulled.Load() {
+		// Each list is cleared before it is truncated: a clip left in its
+		// spare capacity would keep its samples alive.
 		clear(staging.operations)
 		staging.operations = staging.operations[:0]
+		for _, clipID := range changes.Destroys {
+			delete(b.plugin.clips, clipID)
+		}
+		clear(b.plugin.releases)
+		b.plugin.releases = b.plugin.releases[:0]
+		return
 	}
+	// Staging changes left over hold what a full ring did not take, so this
+	// Emit merges into them: the one case in which an update coalesces.
 	merging := len(staging.operations) > 0
 	for _, slot := range changes.Stops {
 		staging.record(operation{kind: operationKindStop, slot: slot}, merging)

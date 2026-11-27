@@ -14,8 +14,9 @@ staging changes, and a destroyed clip held until the mixer has passed it;
 and the device's probe, retry and reports: on Windows a machine with no
 output device is asked about before the open, a device that could not be
 taken is logged once as a warning and retried every `DeviceRetry`, an open
-device is polled for loss as often, a lost one is reported never, and a
-later kernel's ignored `SampleRate` or `BufferSize` is logged once as an
+device is polled for loss as often, a lost one is reported never and its
+ring emptied, nothing is published to a ring no player pulls, and a later
+kernel's ignored `SampleRate` or `BufferSize` is logged once as an
 error. Decoding, the mixer's voices and streaming are designed, not yet
 built. The design is in
 [`docs/design.md`](docs/design.md), and the build on the

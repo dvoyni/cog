@@ -288,3 +288,94 @@ func TestASecondKernelRecordsThatItsConfigWasIgnored(t *testing.T) {
 		t.Fatalf("the reports are %v, want %v once", reports, want)
 	}
 }
+
+// loseDevice unplugs device and waits until plugin's ring is detached and
+// emptied.
+func loseDevice(t *testing.T, device *fakeDevice, plugin *Plugin) {
+	t.Helper()
+	device.unplug(errors.New("the headphones came out"))
+	waitFor(t, "the ring being detached and emptied", func() bool {
+		return !plugin.mixer.ring.pulled.Load() && pendingCount(plugin.mixer.ring) == 0
+	})
+}
+
+// A loss empties the ring in the mixer's place, once its player has stopped:
+// what it had published and the mixer never applied is dropped, and nothing
+// in it keeps a clip alive through the loss, however long the retry fails to
+// take the device again.
+func TestALostDevicesRingHoldsNoClip(t *testing.T) {
+	device := &fakeDevice{}
+	_, plugin := spawnConfiguredOverFake(t, device, quickRetry)
+	waitForReady(t, plugin)
+	b := backend{plugin: plugin}
+	plugin.clips[1] = &fakeClip{}
+	b.Emit(&sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: 1}}})
+
+	device.refuseOpens(errors.New("the context recorded an error"))
+	loseDevice(t, device, plugin)
+	b.Emit(&sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 1, Clip: 1}}})
+
+	ring := plugin.mixer.ring
+	for index, changes := range append(slices.Clone(ring.slots), ring.staging) {
+		for _, operation := range changes.operations[:cap(changes.operations)] {
+			if operation.clip != nil {
+				t.Fatalf("change list %d still holds a clip after the loss", index)
+			}
+		}
+	}
+}
+
+// A device that comes back plays only what was emitted once it was ready:
+// the starts published before the loss, and those emitted while it was
+// gone, are dropped, since sfx restates every live voice when the device
+// turns ready, and none of them reaches the first drain after the attach.
+func TestNoStaleStartReachesTheFirstDrainAfterADeviceComesBack(t *testing.T) {
+	device := &fakeDevice{}
+	_, plugin := spawnConfiguredOverFake(t, device, quickRetry)
+	waitForReady(t, plugin)
+	b := backend{plugin: plugin}
+	emitStart(b, 1)
+	loseDevice(t, device, plugin)
+	emitStart(b, 2)
+
+	device.plugBackIn()
+	waitForReady(t, plugin)
+	emitStart(b, 3)
+
+	applied := drained(plugin.mixer.ring)
+	if len(applied) != 1 || applied[0].kind != operationKindStart || applied[0].clipID != 3 {
+		t.Fatalf("the first drain after the device came back applied %+v, want only the start on clip 3", applied)
+	}
+}
+
+// The flush emitting as fast as it can while the device is lost and comes
+// back, again and again: under -race, the device goroutine emptying the ring
+// in the mixer's place never touches a change list the flush side is
+// swapping or recording into.
+func TestEmitAndALossRunningTogetherShareTheRingSafely(t *testing.T) {
+	device := &fakeDevice{}
+	_, plugin := spawnConfiguredOverFake(t, device, quickRetry)
+	waitForReady(t, plugin)
+	b := backend{plugin: plugin}
+	done := make(chan struct{})
+	flushed := make(chan struct{})
+	go func() {
+		defer close(flushed)
+		for clipID := sfx.ClipID(1); ; clipID++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			emitStart(b, clipID)
+		}
+	}()
+
+	for range 20 {
+		loseDevice(t, device, plugin)
+		device.plugBackIn()
+		waitForReady(t, plugin)
+	}
+	close(done)
+	<-flushed
+}

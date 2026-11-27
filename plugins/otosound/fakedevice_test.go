@@ -132,6 +132,14 @@ func (f *fakeDevice) unplug(err error) {
 	f.gone = err
 }
 
+// refuseOpens has every open after it fail with err, as a lost device the
+// retry cannot take again.
+func (f *fakeDevice) refuseOpens(err error) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.openErr = err
+}
+
 // plugBackIn is the device returning.
 func (f *fakeDevice) plugBackIn() {
 	f.mutex.Lock()

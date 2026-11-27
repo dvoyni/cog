@@ -91,4 +91,7 @@ func TestAReleasedClipIsFreedAtOnceWhileNoMixerHasEverPulled(t *testing.T) {
 	if held := heldCount(plugin); held != 0 {
 		t.Fatalf("%d released clips are held against a counter nothing will ever move", held)
 	}
+	if _, installed := plugin.clips[1]; installed {
+		t.Fatal("the destroyed clip is still in the clip table")
+	}
 }
