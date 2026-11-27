@@ -84,7 +84,7 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 		playhead: play.offset,
 	}
 	v.table.liveCount++
-	if clip.state == clipReady {
+	if clip.state == ClipReady {
 		slot.bind(clip)
 	} else {
 		slot.playedThisFlush = true
@@ -107,6 +107,28 @@ func (v liveVoices) stopBus(bus Bus, endings *[]VoiceEndedEvent) {
 	for index := range v.table.slots {
 		if slot := &v.table.slots[index]; slot.state.live() && (bus == Master || slot.bus == bus) {
 			v.end(slot, ReasonStopped, endings)
+		}
+	}
+}
+
+// release ends every live voice playing the clip at path with
+// ReasonReleased, one still waiting on it included: nothing failed, the game
+// changed its mind, and it is the game's own verb, so the flush that applies
+// it answers it.
+func (v liveVoices) release(path string, endings *[]VoiceEndedEvent) {
+	for index := range v.table.slots {
+		if slot := &v.table.slots[index]; slot.state.live() && slot.path == path {
+			v.end(slot, ReasonReleased, endings)
+		}
+	}
+}
+
+// releaseAll ends every live voice with ReasonReleased, as release does each
+// voice on a clip.
+func (v liveVoices) releaseAll(endings *[]VoiceEndedEvent) {
+	for index := range v.table.slots {
+		if slot := &v.table.slots[index]; slot.state.live() {
+			v.end(slot, ReasonReleased, endings)
 		}
 	}
 }
@@ -137,9 +159,9 @@ func (v liveVoices) resolve(clips clipTable, endings *[]VoiceEndedEvent) {
 		playedThisFlush := slot.playedThisFlush
 		slot.playedThisFlush = false
 		switch clip := clips.state.entries[slot.path]; clip.state {
-		case clipReady:
+		case ClipReady:
 			slot.bind(clip)
-		case clipFailed:
+		case ClipFailed:
 			if !playedThisFlush {
 				v.end(slot, ReasonFailed, endings)
 			}
@@ -388,7 +410,7 @@ func (s *tableSlot) suspended(paused bool) bool {
 func (s *tableSlot) bind(clip clipEntry) {
 	s.state = slotStarting
 	s.clipID = clip.id
-	s.duration = clip.duration
-	s.channels = clip.channels
+	s.duration = clip.info.Duration
+	s.channels = clip.info.Channels
 	s.playhead = s.offset
 }

@@ -110,6 +110,19 @@ func (b *fakeBackend) finishPrepares(err error) {
 	b.deferred = nil
 }
 
+// finishFirstPrepare finishes only the earliest prepare answered done=false
+// and not yet finished, for the next TakePrepared to answer, leaving the rest
+// in flight.
+func (b *fakeBackend) finishFirstPrepare() {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if len(b.deferred) == 0 {
+		return
+	}
+	b.completed = append(b.completed, sfx.Prepared{Token: b.deferred[0], Clip: fakeClip{}})
+	b.deferred = b.deferred[1:]
+}
+
 // counts answers how many prepares were asked for and how many IDs were
 // minted.
 func (b *fakeBackend) counts() (prepareCount int, installCount uint32) {

@@ -12,10 +12,14 @@
 // volume with SetBus and reading it back from BusVolumes. It reads the live
 // voices from LiveVoices, and the device from DeviceView: a device that is
 // absent, not ready yet or lost reads not ready, a fact rather than an error,
-// and every playhead advances whether or not anyone can hear it. No operation returns an error: a clip that cannot
-// be read or prepared is logged once under its path, as an ErrClipUnreadable
-// or an ErrClipFailed, and its voices end with ReasonFailed. Package sfxtest
-// runs sfx in a real kernel over the headless backend, for tests.
+// and every playhead advances whether or not anyone can hear it. It preloads
+// a clip with Preload, so a loading screen pays its read, asks what it is
+// with ClipTable.Info, which never starts a load, and gets its memory back
+// with Release or ReleaseAll, which end the voices on it with ReasonReleased.
+// No operation returns an error: a clip that cannot be read or prepared is
+// logged once under its path, as an ErrClipUnreadable or an ErrClipFailed,
+// and its voices end with ReasonFailed. Package sfxtest runs sfx in a real
+// kernel over the headless backend, for tests.
 //
 // A voice given a Position in VoiceOptions is positional for the rest of its
 // life, heard from the one listener the game places with Queue.SetListener

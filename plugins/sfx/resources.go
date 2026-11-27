@@ -48,7 +48,8 @@ type LiveVoices = liveVoices
 // ClipTable is the resource of what sfx knows of each clip, by path, as of
 // the last flush: read it under kernel.Read[sfx.ClipTable]. It has no
 // mutators, and the flush alone writes it. A path is read once, at the flush
-// that first names it, and the clip shared by every voice that plays it.
+// that first names it, and the clip shared by every voice that plays it until
+// a release forgets it. Info asks about a clip and never starts a load.
 type ClipTable = clipTable
 
 // BusVolumes is the resource of each bus's volume, as of the last flush: read
