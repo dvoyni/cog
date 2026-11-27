@@ -11,11 +11,16 @@ import (
 // readEvent has the harness's plugin run Read's job, between two steps.
 type readEvent struct{}
 
+// recordEvent has the harness's plugin run its recording task before a beat,
+// under UsePluginFlush.
+type recordEvent struct{}
+
 // harnessPlugin is the harness's own plugin, listed right after sfx: it binds
 // the backend UseBackend gave or else the headless backend, unless
 // UsePluginBackend was called, and the harness's memory mount, schedules the
-// harness's records and then sfx's flush on each beat, runs Read's jobs, and
-// keeps each ending sfx publishes, for Endings.
+// harness's records and then sfx's flush on each beat, or under
+// UsePluginFlush the records alone, before it, runs Read's jobs, and keeps
+// each ending sfx publishes, for Endings.
 type harnessPlugin struct {
 	harness *Harness
 }
@@ -33,7 +38,8 @@ func (harnessPlugin) Dependencies() []kernel.PluginName {
 // as a read mount at the root, registers the recording task and the reading
 // task, and subscribes to metronome.UpdateEvent, to schedule the recording
 // task and then sfx's flush with the beat's Delta plus its Lost, joined into
-// the out dependency; to readEvent; and to sfx.VoiceEndedEvent. The tasks'
+// the out dependency, or under UsePluginFlush to recordEvent, to schedule the
+// recording task alone; to readEvent; and to sfx.VoiceEndedEvent. The tasks'
 // bodies stay closures, since they hand the test's records the queue and the
 // test's read the views.
 func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
@@ -57,11 +63,17 @@ func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 		p.harness.reading(voices.Get(), clips.Get(), buses.Get(), listener.Get(), device.Get())
 		return kernel.NoResult{}
 	})
-	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, beat metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
-		recorded := ex.Schedule(record, kernel.NoArg{})
-		flushed := ex.Schedule(flush, beat.Delta+beat.Lost, recorded.Handle())
-		return beat, ex.Join(in, flushed.Handle())
-	})
+	if p.harness.pluginFlush {
+		configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event recordEvent) (recordEvent, kernel.JobHandle) {
+			return event, ex.Schedule(record, kernel.NoArg{}, in).Handle()
+		})
+	} else {
+		configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, beat metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
+			recorded := ex.Schedule(record, kernel.NoArg{})
+			flushed := ex.Schedule(flush, beat.Delta+beat.Lost, recorded.Handle())
+			return beat, ex.Join(in, flushed.Handle())
+		})
+	}
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, event readEvent) (readEvent, kernel.JobHandle) {
 		return event, ex.Schedule(read, kernel.NoArg{}, in).Handle()
 	})
