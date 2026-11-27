@@ -7,6 +7,11 @@ import "fmt"
 // prefix, then the clip's path.
 const clipFailedLogKey = "sfx: clip failed: "
 
+// loopRegionIgnoredLogKey is the prefix of a clip's loop key, the key a loop
+// region its backend dropped is logged once under, and forgotten under when
+// the clip is released: the prefix, then the clip's path.
+const loopRegionIgnoredLogKey = "sfx: loop region ignored: "
+
 // ErrClipUnreadable reports a clip whose bytes could not be read: the failed
 // read of its path through platform.FS. It is terminal, as every clip failure
 // is: the voices recorded against the clip end with ReasonFailed, and only a

@@ -1,6 +1,7 @@
 package sfx
 
 import (
+	"errors"
 	"io/fs"
 	"time"
 
@@ -83,10 +84,11 @@ func (t clipTable) drain(k *kernel.Kernel, backend BackendSocket) {
 // release takes the clip at path out of the table, after the flush has ended
 // the voices playing it: its ID, when it was installed, is appended to
 // destroys, the flush's changes, which a backend applies after their stops,
-// and its failure is forgotten, so a path that failed and is named again is
-// read again and reported again if it fails again. A clip whose prepare is in
-// flight leaves nothing to destroy: its completion finds no entry at its
-// epoch and is dropped. A path the table does not hold is left as it is.
+// and its reports are forgotten, its failure or its dropped loop region, so a
+// path that failed and is named again is read again and reported again if it
+// fails again. A clip whose prepare is in flight leaves nothing to destroy:
+// its completion finds no entry at its epoch and is dropped. A path the table
+// does not hold is left as it is.
 func (t clipTable) release(k *kernel.Kernel, path string, destroys *[]ClipID) {
 	entry, held := t.state.entries[path]
 	if !held {
@@ -96,6 +98,7 @@ func (t clipTable) release(k *kernel.Kernel, path string, destroys *[]ClipID) {
 	switch entry.state {
 	case ClipReady:
 		*destroys = append(*destroys, entry.id)
+		k.Logger().ForgetLogOnce(loopRegionIgnoredLogKey + path)
 	case ClipFailed:
 		k.Logger().ForgetLogOnce(clipFailedLogKey + path)
 	}
@@ -110,9 +113,17 @@ func (t clipTable) releaseAll(k *kernel.Kernel, destroys *[]ClipID) {
 
 // installClip has backend mint the ID of prepared, the clip at path, at the
 // flush, where the destroy that pairs with it can be stated, and answers its
-// entry, ready with the clip's facts. A backend that prepared nothing, or
-// minted the zero ID, fails the clip with ErrClipNotPrepared, and one whose
-// Install failed with ErrClipFailed.
+// entry, ready with the clip's facts and the span a looping voice on it
+// repeats between: its loop region, or the whole clip when it declares none or
+// one the clip does not contain. That last is not distrust of the backend,
+// which drops a malformed region itself; it is that the wrap subtracts a span,
+// and a span outside the clip is a loop with no reason to stop. A backend that
+// prepared nothing, or minted the zero ID, fails the clip with
+// ErrClipNotPrepared, and one whose Install failed with ErrClipFailed. A loop
+// region the backend dropped is logged once under the clip's loop key, as the
+// ErrLoopRegionIgnored its LoopRegionErr answered with the path filled in, and
+// the clip loops whole: it prepares and plays, and this is the only notice
+// that it plays without the loop point its author wrote.
 func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared PreparedClip) clipEntry {
 	if prepared == nil {
 		k.Logger().LogErr(ErrClipNotPrepared{Path: path})
@@ -126,15 +137,34 @@ func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared 
 		k.Logger().LogErr(ErrClipNotPrepared{Path: path})
 		return clipEntry{state: ClipFailed}
 	}
-	return clipEntry{
+	if err := prepared.LoopRegionErr(); err != nil {
+		ignored, isIgnored := errors.AsType[ErrLoopRegionIgnored](err)
+		if !isIgnored {
+			ignored = ErrLoopRegionIgnored{Err: err}
+		}
+		ignored.Path = path
+		k.Logger().LogErrOnce(loopRegionIgnoredLogKey+path, ignored)
+	}
+	duration := convertSecondsToDuration(prepared.Duration())
+	entry := clipEntry{
 		state: ClipReady,
 		id:    id,
 		info: ClipInfo{
-			Duration:   time.Duration(float64(prepared.Duration()) * float64(time.Second)),
+			Duration:   duration,
 			Channels:   prepared.Channels(),
 			SampleRate: prepared.SampleRate(),
 		},
+		loopEnd: duration,
 	}
+	if region, declared := prepared.LoopRegion().Get(); declared {
+		start := convertSecondsToDuration(region.Start)
+		end := convertSecondsToDuration(region.End)
+		if start >= 0 && end > start && end <= duration {
+			entry.loopStart = start
+			entry.loopEnd = end
+		}
+	}
+	return entry
 }
 
 // failClip logs err once under the key of the clip at path, and answers its
@@ -143,6 +173,12 @@ func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared 
 func failClip(k *kernel.Kernel, path string, err error) clipEntry {
 	k.Logger().LogErrOnce(clipFailedLogKey+path, err)
 	return clipEntry{state: ClipFailed}
+}
+
+// convertSecondsToDuration answers seconds, as the seam carries a clip's
+// duration and loop region, as the time.Duration a game gives and reads.
+func convertSecondsToDuration(seconds float32) time.Duration {
+	return time.Duration(float64(seconds) * float64(time.Second))
 }
 
 // clipTableState is the table clipTable points to.
@@ -169,8 +205,11 @@ type clipEntry struct {
 	// carries; zero once the clip has failed or is ready, since no completion
 	// is matched against it then.
 	epoch uint64
-	// id is the ID the backend's Install minted, and info the prepared
-	// clip's facts, each zero until the clip is ready.
-	id   ClipID
-	info ClipInfo
+	// id is the ID the backend's Install minted, info the prepared clip's
+	// facts, and loopStart and loopEnd the span a looping voice on it
+	// repeats between, each zero until the clip is ready.
+	id        ClipID
+	info      ClipInfo
+	loopStart time.Duration
+	loopEnd   time.Duration
 }

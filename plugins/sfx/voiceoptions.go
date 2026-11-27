@@ -2,13 +2,28 @@ package sfx
 
 import "github.com/dvoyni/cog/libs/m"
 
-// VoiceOptions is how a voice starts, to Play: an absent field is the
-// default. It is comparable and pointer-free, so a component can be exactly
+// VoiceOptions is how a voice starts, to Play, and what it becomes, to
+// SetVoice: an absent field is the default to Play and unchanged to
+// SetVoice. It is comparable and pointer-free, so a component can be exactly
 // this value.
 type VoiceOptions struct {
 	// Bus is the bus the voice's volume is folded with; absent, or outside
 	// Config.MaxBuses, it is Master.
 	Bus m.Maybe[Bus]
+	// Volume is the voice's own linear volume, 1 being unity, folded with its
+	// bus's, its falloff and its cone; absent is 1.
+	Volume m.Maybe[float32]
+	// Pitch is the playback rate, 1 being the clip's own; absent is 1. The
+	// playhead advances at it, so a voice at twice its rate ends in half its
+	// clip's duration. A negative pitch is 0, a freeze, since it would run
+	// the voice backwards off the front of its clip.
+	Pitch m.Maybe[float32]
+	// Loop has the voice repeat the way its clip says to, over the clip's
+	// loop region, or the whole clip when it declares none, and never end by
+	// itself; absent is a one-shot. Changing it on a voice the backend
+	// already holds restarts the voice where it stands, a block-accurate
+	// discontinuity, as a Seek is.
+	Loop m.Maybe[bool]
 	// Paused stops the voice's playhead without ending it; absent is
 	// playing. It is the voice's own, and stays what the game said whatever
 	// Queue.SetPaused does: a voice is silent while either is set.
@@ -22,8 +37,9 @@ type VoiceOptions struct {
 	Priority m.Maybe[int]
 	// Position is where the voice is, in the game's units. A voice with none
 	// is non-positional, heard centred, with no falloff, cone or panning,
-	// which is what a UI click is. The first position a voice receives makes
-	// it positional for the rest of its life.
+	// which is what a UI click is. The first position a voice receives, at
+	// Play or by SetVoice, makes it positional for the rest of its life: a
+	// voice that should stop being positional is a new Play.
 	Position m.Maybe[m.Vec3]
 	// Orientation is which way a positional voice faces, on the listener's
 	// axes: forward -Z, up +Y, right +X. Its Cone needs it: a voice with no
@@ -44,18 +60,55 @@ type VoiceOptions struct {
 // computeAudibility answers how loud a voice with these options is heard by a
 // listener at listenerAt, on a bus at busVolume, before panning: its falloff
 // times, when it has a facing, its cone, 1 on a non-positional voice, times
-// busVolume; and how far it is from the listener, zero on a non-positional
-// voice. It is the one scalar stealing ranks on, computed for a voice in the
-// table and for a play arriving at it alike, so the two compare to the bit.
+// its own volume and busVolume; and how far it is from the listener, zero on
+// a non-positional voice. It is the one scalar stealing ranks on, computed
+// for a voice in the table and for a play arriving at it alike, so the two
+// compare to the bit.
 func (o VoiceOptions) computeAudibility(listenerAt m.Vec3, busVolume float32) (audibility, distance float32) {
+	volume := o.Volume.Or(1) * busVolume
 	position, positional := o.Position.Get()
 	if !positional {
-		return busVolume, 0
+		return volume, 0
 	}
 	distance = position.Distance(listenerAt)
 	gain := computeDistanceGain(o.Falloff.Or(Falloff{}).resolve(), float64(distance))
 	if orientation, facing := o.Orientation.Get(); facing {
 		gain *= computeConeGain(o.Cone.Or(Cone{}).resolve(), position, orientation.Rotate(m.Vec3{Z: -1}), listenerAt)
 	}
-	return float32(gain) * busVolume, distance
+	return float32(gain) * volume, distance
+}
+
+// merge answers o with every field next states replacing o's own.
+func (o VoiceOptions) merge(next VoiceOptions) VoiceOptions {
+	if next.Bus.Present() {
+		o.Bus = next.Bus
+	}
+	if next.Volume.Present() {
+		o.Volume = next.Volume
+	}
+	if next.Pitch.Present() {
+		o.Pitch = next.Pitch
+	}
+	if next.Loop.Present() {
+		o.Loop = next.Loop
+	}
+	if next.Paused.Present() {
+		o.Paused = next.Paused
+	}
+	if next.Priority.Present() {
+		o.Priority = next.Priority
+	}
+	if next.Position.Present() {
+		o.Position = next.Position
+	}
+	if next.Orientation.Present() {
+		o.Orientation = next.Orientation
+	}
+	if next.Falloff.Present() {
+		o.Falloff = next.Falloff
+	}
+	if next.Cone.Present() {
+		o.Cone = next.Cone
+	}
+	return o
 }

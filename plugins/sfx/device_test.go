@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/sfx"
 	"github.com/dvoyni/cog/plugins/sfx/sfxtest"
 )
@@ -249,5 +250,37 @@ func TestARecoveryRepinsAPausedVoiceAtTheSampleItSuspendedOn(t *testing.T) {
 	}
 	if !starts[0].Params.Paused {
 		t.Fatal("the restart says the voice is running, and it is paused")
+	}
+}
+
+// A recovery restarts every live voice, and a restart is the only sentence
+// the seam has for "this voice is looping": VoiceUpdate carries no Loop. So a
+// restart that forgot the flag would silently un-loop the music the moment
+// the headphones went back in, and nothing else in sfx would ever notice: the
+// view still says Loop, sfx's own playhead still wraps, and only the backend
+// disagrees.
+func TestARecoveryKeepsALoopingVoiceLooping(t *testing.T) {
+	backend := &fakeBackend{}
+	seam := &seam{}
+	h := newFakeHarness(t, backend, seamPlugin{seam: seam})
+
+	playWith(h, sfx.VoiceOptions{Loop: m.Some(true)})
+	if starts := lastChanges(seam).Starts; len(starts) != 1 || !starts[0].Loop {
+		t.Fatalf("the ordinary start crossed as %+v, want one that loops", starts)
+	}
+
+	backend.setReady(false)
+	for range 10 {
+		h.Step()
+	}
+	backend.setReady(true)
+	h.Step()
+
+	starts := lastChanges(seam).Starts
+	if len(starts) != 1 {
+		t.Fatalf("the recovery started %+v, want the one live voice", starts)
+	}
+	if !starts[0].Loop {
+		t.Fatal("a looping voice came back from a lost device as a one-shot")
 	}
 }
