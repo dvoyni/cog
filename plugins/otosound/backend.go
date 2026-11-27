@@ -16,10 +16,10 @@ type backend struct {
 	plugin *Plugin
 }
 
-// Voices sizes the handoff ring for n slots, an n of zero or less taken as
-// one, and only then opens the device and starts this kernel's player over
-// the mixer, which drains the ring and plays silence: the mixer must exist
-// complete before anything can pull a block out of it. It takes the
+// Voices sizes the handoff ring and the mixer's voice table for n slots, an n
+// of zero or less taken as one, and only then opens the device and starts
+// this kernel's player over the mixer: the mixer must exist complete before
+// anything can pull a block out of it. It takes the
 // process's oto context, or creates it, synchronously, since that does not
 // wait for the device, and so settles the rate every clip is converted to,
 // the context's; the player is started on the device goroutine, which
@@ -28,7 +28,8 @@ type backend struct {
 // that cannot be opened, or whose player cannot start, leaves the Device not
 // ready.
 func (b backend) Voices(n int) {
-	b.plugin.mixer.ring = newHandoffRing(b.plugin.config.RingDepth, max(n, 1))
+	voiceCount := max(n, 1)
+	b.plugin.mixer = makeMixer(newHandoffRing(b.plugin.config.RingDepth, voiceCount), voiceCount)
 	settings, err := b.plugin.device.open(b.plugin.config.SampleRate, b.plugin.config.BufferSize)
 	if err != nil {
 		return

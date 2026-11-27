@@ -137,3 +137,11 @@ func (c *preparedClip) LoopRegion() m.Maybe[sfx.LoopRegion] { return c.loopRegio
 // the clip's tags declared and the clip could not have, nil when the region
 // is fine or absent.
 func (c *preparedClip) LoopRegionErr() error { return c.loopRegionErr }
+
+// heldFrameAt is the frame of the clip's samples, fractional, that sounds at
+// seconds into the clip: seconds at its source's rate, scaled onto the frames
+// its samples hold, so it names the same instant whatever rate they are held
+// at, a voice's offset or its loop region's bounds among them.
+func (c *preparedClip) heldFrameAt(seconds float64) float64 {
+	return seconds * float64(c.sampleRate) * float64(len(c.samples)/c.channels) / float64(c.frames)
+}
