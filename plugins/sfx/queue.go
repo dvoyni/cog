@@ -1,6 +1,9 @@
 package sfx
 
 import (
+	"cmp"
+	"math"
+	"slices"
 	"time"
 
 	"github.com/dvoyni/cog/libs/m"
@@ -19,9 +22,11 @@ func makeQueue(maxVoices, maxBuses int) queue {
 		freeSlots[i] = uint32(maxVoices - 1 - i)
 	}
 	return queue{state: &queueState{
-		generations:   make([]uint32, maxVoices),
-		freeSlots:     freeSlots,
-		busVolumeSets: make([]m.Maybe[float32], maxBuses),
+		generations:       make([]uint32, maxVoices),
+		freeSlots:         freeSlots,
+		stealOrder:        make([]stealCandidate, 0, maxVoices),
+		busVolumeSets:     make([]m.Maybe[float32], maxBuses),
+		rankingBusVolumes: make([]float32, maxBuses),
 	}}
 }
 
@@ -35,12 +40,24 @@ func makeQueue(maxVoices, maxBuses int) queue {
 // ready yet waits on it, addressable and stoppable, and starts from offset
 // once it is, with no catch-up. A clip that cannot be read or prepared is
 // reported once under its path and ends its voices with ReasonFailed, a
-// flush or more after the play, never in the flush that applies it. A play
-// that finds every slot taken still gets a real handle, and its voice ends
-// with ReasonStolen in the flush that applies it, never having been live.
+// flush or more after the play, never in the flush that applies it.
+//
+// At a full table the play steals: the voice with the lowest Priority, and
+// within it the lowest audibility, ties going to the oldest, ends with
+// ReasonStolen in the flush that applies the play, which takes its slot, and
+// is never resumed. The play is as stealable as any voice and ranks as the
+// newest: one strictly below every live voice is the one that loses, still
+// getting a real handle, its voice ending with ReasonStolen in the flush that
+// applies it, never having been live. The victim is chosen here, as the play
+// is recorded, against the table as the last flush left it: a play steals
+// only a voice live at the end of the last flush, never one a play before it
+// in the same flush started, and every candidate, the play included, is
+// ranked against the bus volumes and the listener of the last flush. The
+// play's own rank is read from options here, so a later operation on its
+// voice before the flush does not change what it stole.
 func (q queue) Play(path string, offset time.Duration, options VoiceOptions) Voice {
-	voice := q.mintVoice()
 	bus := options.Bus.Or(Master).resolve(len(q.state.busVolumeSets))
+	voice := q.mintVoice(options, bus)
 	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset, options: options, bus: bus})
 	return voice
 }
@@ -137,10 +154,14 @@ func (q queue) ReleaseAll() {
 	q.state.operations = append(q.state.operations, operation{kind: operationReleaseAll})
 }
 
-// mintVoice answers the next handle: a free slot's next generation, or, at a
-// full table, a handle of the index past the last slot, which addresses
-// nothing.
-func (q queue) mintVoice() Voice {
+// mintVoice answers the handle of a play with options on bus: a free slot's
+// next generation; at a full table, the next generation of the slot of the
+// voice the play outranks, which goes on holding the victim's whole handle,
+// so every operation recorded against the victim before the flush still finds
+// it, applied in order before the start that takes the slot over; or, when
+// the play outranks nothing, a handle of the index past the last slot, which
+// addresses nothing.
+func (q queue) mintVoice(options VoiceOptions, bus Bus) Voice {
 	state := q.state
 	if count := len(state.freeSlots); count > 0 {
 		index := state.freeSlots[count-1]
@@ -148,8 +169,45 @@ func (q queue) mintVoice() Voice {
 		state.generations[index]++
 		return Voice(uint64(state.generations[index])<<32 | uint64(index))
 	}
+	if count := len(state.stealOrder); count > 0 {
+		audibility, _ := options.computeAudibility(state.rankingListenerAt, state.rankingBusVolumes[bus])
+		incoming := voiceRank{priority: options.Priority.Or(0), audibility: audibility, startNumber: math.MaxUint64}
+		if victim := state.stealOrder[count-1]; victim.rank.compare(incoming) < 0 {
+			state.stealOrder = state.stealOrder[:count-1]
+			state.generations[victim.index]++
+			return Voice(uint64(state.generations[victim.index])<<32 | uint64(victim.index))
+		}
+	}
 	state.unslottedCount++
 	return Voice(uint64(state.unslottedCount)<<32 | uint64(len(state.generations)))
+}
+
+// rankSlots restates what the next flush's plays are minted against, once
+// the flush's changes are handed over, so a slot is stopped before sfx reuses
+// it: the free slots, the last first, so popping from the end hands out slot
+// 0 first; every live voice in the steal order, the one stolen next last;
+// and the ranking context, the bus volumes and the listener's position a play
+// arriving is ranked against. It is copied here because a recorder holds the
+// queue's lock and nothing else. One pass restates both lists, so a slot is
+// free or stealable, never both and never neither.
+func (q queue) rankSlots(voices liveVoices, buses busVolumes, heardFrom listener) {
+	state := q.state
+	state.freeSlots = state.freeSlots[:0]
+	state.stealOrder = state.stealOrder[:0]
+	for index := len(voices.table.slots) - 1; index >= 0; index-- {
+		switch slot := &voices.table.slots[index]; {
+		case slot.state == slotEmpty:
+			state.freeSlots = append(state.freeSlots, uint32(index))
+		case slot.state.live():
+			state.stealOrder = append(state.stealOrder, stealCandidate{
+				index: uint32(index),
+				rank:  voiceRank{priority: slot.options.Priority.Or(0), audibility: slot.audibility, startNumber: slot.startNumber},
+			})
+		}
+	}
+	slices.SortFunc(state.stealOrder, func(a, b stealCandidate) int { return b.rank.compare(a.rank) })
+	copy(state.rankingBusVolumes, buses.volumes)
+	state.rankingListenerAt = heardFrom.position
 }
 
 // queueState is the queue's own state.
@@ -167,6 +225,15 @@ type queueState struct {
 	// freeSlots are the slots no voice holds, popped from the end so slot 0
 	// goes first.
 	freeSlots []uint32
+	// stealOrder is the slots of the voices live at the end of the last
+	// flush, the one stolen next last, so it is popped from the end as a
+	// free slot is, each at most once before the next flush.
+	stealOrder []stealCandidate
+	// rankingBusVolumes and rankingListenerAt are the ranking context, each
+	// bus's volume and the listener's position as of the end of the last
+	// flush, which a play arriving is ranked against.
+	rankingBusVolumes []float32
+	rankingListenerAt m.Vec3
 	// unslottedCount counts the handles minted at a full table, each the
 	// generation of the next, so no two compare equal.
 	unslottedCount uint32
@@ -207,4 +274,34 @@ type operation struct {
 	options VoiceOptions
 	// bus is the resolved bus a play's voice plays on, or a StopBus stops.
 	bus Bus
+}
+
+// voiceRank is the key stealing orders voices by: the lowest priority loses,
+// then the lowest audibility, ties broken by age, oldest first. Priority is
+// a band and not a weight, which is why it is compared first rather than
+// folded into audibility: a weight would let a loud enough crowd of
+// footsteps outvote the music.
+type voiceRank struct {
+	priority   int
+	audibility float32
+	// startNumber is the voice's place in the order the table started
+	// voices in, and a play arriving ranks as the newest of all.
+	startNumber uint64
+}
+
+// compare answers below zero when r is stolen before other, above zero when
+// other is, and zero only for one voice: startNumber is unique, which makes
+// the tie contract rather than whatever order the table was walked in.
+func (r voiceRank) compare(other voiceRank) int {
+	return cmp.Or(
+		cmp.Compare(r.priority, other.priority),
+		cmp.Compare(r.audibility, other.audibility),
+		cmp.Compare(r.startNumber, other.startNumber),
+	)
+}
+
+// stealCandidate is one live voice's slot as the steal order holds it.
+type stealCandidate struct {
+	index uint32
+	rank  voiceRank
 }

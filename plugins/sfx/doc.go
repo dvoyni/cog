@@ -16,6 +16,11 @@
 // a clip with Preload, so a loading screen pays its read, asks what it is
 // with ClipTable.Info, which never starts a load, and gets its memory back
 // with Release or ReleaseAll, which end the voices on it with ReasonReleased.
+// At most Config.MaxVoices voices exist at once: a play arriving at a full
+// table steals from the voice in the lowest VoiceOptions.Priority band the
+// least audible, ties going to the oldest, or is itself the one that loses,
+// either ending with ReasonStolen, so music put a band up survives any crowd
+// of footsteps.
 // No operation returns an error: a clip that cannot be read or prepared is
 // logged once under its path, as an ErrClipUnreadable or an ErrClipFailed,
 // and its voices end with ReasonFailed. Package sfxtest runs sfx in a real

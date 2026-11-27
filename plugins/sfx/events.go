@@ -30,8 +30,12 @@ const (
 	ReasonFinished Reason = iota
 	// ReasonStopped is Stop.
 	ReasonStopped
-	// ReasonStolen is the cap: a play that found every slot taken ends with
-	// it in the flush that applies it, never having been live.
+	// ReasonStolen is the cap: a play arriving at a full table ended the
+	// voice it outranked, the lowest Priority and within it the least
+	// audible, oldest first on a tie, or lost to every voice live and ended
+	// itself, never having been live. Either arrives in the flush that
+	// applies the play, and nothing resumes a stolen voice: a game that wants
+	// the sound back plays it again.
 	ReasonStolen
 	// ReasonFailed is a clip that could not be read or prepared. It arrives
 	// one or more flushes after the play, never in the flush that applied it,
