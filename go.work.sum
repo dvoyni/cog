@@ -1,8 +1,14 @@
+github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4 h1:RTOwvoccqx04hPNmpmHxeYcYZ4URluwekaKF0x7H7xc=
+github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4/go.mod h1:MEig/1Sbh2CUGcPHBehQY/m5VNjtkUe/y+u6mmf6mmM=
+github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8 h1:fqJbeqdCXYaQphvLTkxI4CTQUKjt+b30KLE00xzQuaA=
+github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8/go.mod h1:DoftRo4AznKnShRl1GxiTFCseHr4zR9BN3TWXyuzrqQ=
 github.com/go-text/typesetting v0.3.5 h1:XZPUooClHY0Vf/rFyUyuPRNEkawARaFzLMQcXLSEyPk=
 github.com/go-text/typesetting v0.3.5/go.mod h1:XZO1hD+nQVyvVa5IicQk7FsCa4PFQaJ2soWAP1f//68=
+github.com/go-text/typesetting-utils v0.0.0-20260419141703-4ffe8874dabc/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
 github.com/gogpu/gpucontext v0.31.3/go.mod h1:pnyWQA9lpvESPAKoqzKlsg3pDMFSkxdjonu4gWvnNtA=
 github.com/gogpu/gputypes v0.8.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
 github.com/gogpu/naga v0.21.5/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
 github.com/gogpu/wgpu v0.34.2/go.mod h1:erhaIjD9psJKjHqAhn5MWdJETcACR1NGoqLhkTAHkFM=
 golang.org/x/image v0.23.0 h1:HseQ7c2OpPKTPVzNjG5fwJsOTCiiwS4QdsYi5XU6H68=
 golang.org/x/image v0.23.0/go.mod h1:wJJBTdLfCCf3tiHa1fNxpZmUI4mmoZvwMCPP0ddoNKY=
+golang.org/x/text v0.21.0/go.mod h1:4IBbMaMmOPCJ8SecivzSH54+73PCFmPWxNTLm+vZkEQ=

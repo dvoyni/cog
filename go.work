@@ -12,6 +12,7 @@ use (
 	./plugins/mux
 	./plugins/platform
 	./plugins/render
+	./plugins/sfx
 	./submodules/gogpu
 	./submodules/wgpu
 )
@@ -30,4 +31,12 @@ replace (
 	github.com/dvoyni/cog/plugins/platform v0.0.0 => ./plugins/platform
 	github.com/dvoyni/cog/plugins/render v0.0.0 => ./plugins/render
 	github.com/gogpu/gogpu v0.0.0 => ./submodules/gogpu
+)
+
+// sfx's headless backend, and otosound beside it, decode Vorbis through cog's
+// permanent forks of jfreymuth's decoder. The pair is replaced here, once for
+// the workspace, so every module decoding Vorbis builds on the same pins.
+replace (
+	github.com/jfreymuth/oggvorbis => github.com/dvoyni/oggvorbis v1.0.6-0.20260921150857-546236badfd4
+	github.com/jfreymuth/vorbis => github.com/dvoyni/vorbis v1.0.3-0.20260921150454-ab3e6ce988a8
 )
