@@ -24,12 +24,15 @@ and the handoff ring with the releases held behind its applied counter, from
 changes drained by a mixer that still plays silence; so is the decoded tier of
 *Preparing a clip*, with *Loop regions*, from
 [otosound: resident clips decoded in Prepare](https://github.com/dvoyni/cog/issues/968):
-a clip within `DecodedClipLimit` is decoded on a prepare goroutine, held at its
-source's rate, and installed in the clip table. Until streaming is built, a
-clip over the limit, or any clip under the always-stream sentinel, fails its
-prepare with a private error saying it would stream, and a clip whose length
-reads zero fails with `ErrNoStreamLength`, as under the headless backend,
-rather than being counted. The rest is designed, not yet built. v1's otosound,
+a clip within `DecodedClipLimit` is decoded on a prepare goroutine and
+installed in the clip table; and the decoded tier's half of *Resampling*, from
+[otosound: resampling in Prepare](https://github.com/dvoyni/cog/issues/970):
+the prepare goroutine converts a decoded clip to the rate in force with the
+windowed sinc, the clip still answering its source's rate. Until streaming
+is built, a clip over the limit, or any clip under the always-stream
+sentinel, fails its prepare with a private error saying it would stream, and
+a clip whose length reads zero fails with `ErrNoStreamLength`, as under the
+headless backend, rather than being counted. The rest is designed, not yet built. v1's otosound,
 which this ports, was built and tested on v1's kernel.
 
 ## Problem Statement

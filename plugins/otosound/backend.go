@@ -21,7 +21,8 @@ type backend struct {
 // the mixer, which drains the ring and plays silence: the mixer must exist
 // complete before anything can pull a block out of it. It takes the
 // process's oto context, or creates it, synchronously, since that does not
-// wait for the device; the player is started on the device goroutine, which
+// wait for the device, and so settles the rate every clip is converted to,
+// the context's; the player is started on the device goroutine, which
 // waits for the context to be ready and then sets the Device ready, at the
 // rate and buffer size in force. It never blocks or fails the game: a device
 // that cannot be opened, or whose player cannot start, leaves the Device not
@@ -32,6 +33,7 @@ func (b backend) Voices(n int) {
 	if err != nil {
 		return
 	}
+	b.plugin.outputSampleRate = settings.sampleRate
 	b.plugin.deviceGoroutine.Go(func() { b.startPlayer(settings) })
 }
 
@@ -106,19 +108,22 @@ func (b backend) Device() sfx.Device { return *b.plugin.status.Load() }
 
 // Prepare answers not done and prepares the clip on a goroutine of its own,
 // off both the flush and the device thread: a clip whose decoded size is
-// within Config.DecodedClipLimit is decoded there, once, and the encoded
-// bytes, otosound's from the call on, are let go behind it. Its completion,
+// within Config.DecodedClipLimit is decoded there, once, and converted to
+// the rate the mixer produces, and the encoded bytes, otosound's from the
+// call on, are let go behind it. The clip still answers its source's facts,
+// its rate among them, never the device's. Its completion,
 // the prepared clip or the error, comes back under token through
 // TakePrepared. A clip over the limit streams, which is not built yet, so its
 // completion is errStreamingNotBuilt; the prepare's other errors are
 // ErrNotOggVorbis, ErrNoStreamFormat and ErrNoStreamLength.
 func (b backend) Prepare(token any, encoded []byte) (sfx.PreparedClip, bool, error) {
 	decodedClipLimit := b.plugin.config.DecodedClipLimit
+	outputSampleRate := b.plugin.outputSampleRate
 	b.plugin.prepareGoroutines.Go(func() {
 		completion := sfx.Prepared{Token: token}
 		// A failed prepare hands sfx a nil clip, never a typed nil, which sfx
 		// would install rather than report.
-		if clip, err := prepareClip(encoded, decodedClipLimit); err != nil {
+		if clip, err := prepareClip(encoded, decodedClipLimit, outputSampleRate); err != nil {
 			completion.Err = err
 		} else {
 			completion.Clip = clip

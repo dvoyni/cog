@@ -18,9 +18,10 @@ const fixtureDecodedSize = clipFrames * clipChannels * decodedSampleSize
 
 // A clip under the limit is decoded once and holds its samples, answering
 // its source's facts; one over it is left for streaming, which is not built
-// yet, so its prepare fails with errStreamingNotBuilt.
+// yet, so its prepare fails with errStreamingNotBuilt. The device runs at the
+// clip's own rate, so nothing is converted.
 func TestAClipUnderTheLimitIsResidentAndOneOverItIsLeftForStreaming(t *testing.T) {
-	resident, err := prepareClip(readFixture(t), defaultDecodedClipLimit)
+	resident, err := prepareClip(readFixture(t), defaultDecodedClipLimit, clipRate)
 	if err != nil {
 		t.Fatalf("preparing the fixture under the default limit: %v", err)
 	}
@@ -32,7 +33,7 @@ func TestAClipUnderTheLimitIsResidentAndOneOverItIsLeftForStreaming(t *testing.T
 			resident.Duration(), resident.Channels(), resident.SampleRate(), clipDuration, clipChannels, clipRate)
 	}
 
-	streamed, err := prepareClip(readFixture(t), 64<<10)
+	streamed, err := prepareClip(readFixture(t), 64<<10, clipRate)
 	if !errors.Is(err, errStreamingNotBuilt) || streamed != nil {
 		t.Fatalf("a %d byte clip under a 64 KiB limit answered %v and %v, want errStreamingNotBuilt", fixtureDecodedSize, streamed, err)
 	}
@@ -53,7 +54,7 @@ func TestTheResidencyLimitsSentinelsChooseTheTierOutright(t *testing.T) {
 		"a byte over a limit": {fixtureDecodedSize - 1, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := prepareClip(readFixture(t), test.limit)
+			_, err := prepareClip(readFixture(t), test.limit, clipRate)
 			if test.decoded && err != nil {
 				t.Fatalf("the fixture under a limit of %d answered %v, want it decoded", test.limit, err)
 			}
@@ -65,9 +66,10 @@ func TestTheResidencyLimitsSentinelsChooseTheTierOutright(t *testing.T) {
 }
 
 // The decoded samples are the stream's own, frame for frame what the decoder
-// reads out of the file.
+// reads out of the file, when the device runs at the clip's own rate and
+// nothing is converted.
 func TestAResidentClipHoldsTheDecodedFramesOfItsStream(t *testing.T) {
-	clip, err := prepareClip(readFixture(t), decodedClipLimitNone)
+	clip, err := prepareClip(readFixture(t), decodedClipLimitNone, clipRate)
 	if err != nil {
 		t.Fatalf("preparing the fixture: %v", err)
 	}
@@ -113,7 +115,7 @@ func TestARetaggedFixtureIsStillTheSameClip(t *testing.T) {
 // The region rides in the file, is read in the pass that reads the duration,
 // channels and rate, and comes up in seconds, the decoded clip answering it.
 func TestAClipsLoopRegionComesOffItsVorbisComments(t *testing.T) {
-	clip, err := prepareClip(retagClip(t, readFixture(t), "LOOPSTART=11025", "LOOPLENGTH=22050"), decodedClipLimitNone)
+	clip, err := prepareClip(retagClip(t, readFixture(t), "LOOPSTART=11025", "LOOPLENGTH=22050"), decodedClipLimitNone, clipRate)
 	if err != nil {
 		t.Fatalf("preparing the tagged fixture: %v", err)
 	}
@@ -138,7 +140,7 @@ func TestAMalformedLoopRegionIsDroppedWholeAndNeverClamped(t *testing.T) {
 		"a start that is no count": {"LOOPSTART=bar", "LOOPLENGTH=22050"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			clip, err := prepareClip(retagClip(t, readFixture(t), tags...), decodedClipLimitNone)
+			clip, err := prepareClip(retagClip(t, readFixture(t), tags...), decodedClipLimitNone, clipRate)
 			if err != nil {
 				t.Fatalf("a malformed loop tag failed the clip: %v", err)
 			}
@@ -157,7 +159,7 @@ func TestAMalformedLoopRegionIsDroppedWholeAndNeverClamped(t *testing.T) {
 // clip's true length: otosound has no name for a clip, and sfx fills the path
 // in when it reports it.
 func TestADroppedLoopRegionIsAnsweredByLoopRegionErrWithoutItsPath(t *testing.T) {
-	clip, err := prepareClip(retagClip(t, readFixture(t), "LOOPSTART=99999999"), decodedClipLimitNone)
+	clip, err := prepareClip(retagClip(t, readFixture(t), "LOOPSTART=99999999"), decodedClipLimitNone, clipRate)
 	if err != nil {
 		t.Fatalf("a malformed loop tag failed the clip: %v", err)
 	}
@@ -174,7 +176,7 @@ func TestADroppedLoopRegionIsAnsweredByLoopRegionErrWithoutItsPath(t *testing.T)
 // A clip with no tags reports no region, which means the whole clip, and
 // nothing is dropped.
 func TestAnUntaggedClipReportsNoRegionAndNothingIsDropped(t *testing.T) {
-	clip, err := prepareClip(readFixture(t), decodedClipLimitNone)
+	clip, err := prepareClip(readFixture(t), decodedClipLimitNone, clipRate)
 	if err != nil {
 		t.Fatalf("preparing the fixture: %v", err)
 	}
