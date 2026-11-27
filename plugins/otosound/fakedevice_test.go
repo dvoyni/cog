@@ -39,9 +39,17 @@ type fakeDevice struct {
 	// probeCount, openCount, playCount and closeCount count each call that
 	// found something to do: close only while a player plays.
 	probeCount, openCount, playCount, closeCount int
+	// calls names every call made to the device, in order, and is written
+	// outside mutex, unguarded: oto's device keeps its player so, since
+	// otosound orders every call it makes to its device, Voices' take before
+	// the device goroutine's calls and Destroy's close after the goroutine
+	// has returned, and -race sees any call that is not so ordered. It is
+	// read only once the kernel is destroyed.
+	calls []string
 }
 
 func (f *fakeDevice) probe() error {
+	f.calls = append(f.calls, "probe")
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.probeCount++
@@ -49,6 +57,7 @@ func (f *fakeDevice) probe() error {
 }
 
 func (f *fakeDevice) open(sampleRate int, bufferSize time.Duration) (deviceSettings, error) {
+	f.calls = append(f.calls, "open")
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.openCount++
@@ -62,6 +71,7 @@ func (f *fakeDevice) open(sampleRate int, bufferSize time.Duration) (deviceSetti
 }
 
 func (f *fakeDevice) play(source io.Reader) error {
+	f.calls = append(f.calls, "play")
 	if f.contextReady != nil {
 		<-f.contextReady
 	}
@@ -76,6 +86,7 @@ func (f *fakeDevice) play(source io.Reader) error {
 }
 
 func (f *fakeDevice) poll() error {
+	f.calls = append(f.calls, "poll")
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.gone
@@ -84,6 +95,7 @@ func (f *fakeDevice) poll() error {
 // close models oto's PauseAndStopReading: once it returns, nothing reads the
 // source.
 func (f *fakeDevice) close() {
+	f.calls = append(f.calls, "close")
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	if f.source == nil {

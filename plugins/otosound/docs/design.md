@@ -43,7 +43,10 @@ whose length reads zero still fails with `ErrNoStreamLength`, as under the
 headless backend, rather than streaming and being counted: such a stream's
 last page carries a granule position of zero, and the oggvorbis fork's
 `Reader.Read` panics on the last packet of one, its discard of the padding
-past the granule going negative. The rest is designed, not yet built. v1's
+past the granule going negative. The concurrency tests of *Testing
+Decisions* are built too, from
+[otosound: race tests](https://github.com/dvoyni/cog/issues/972). The rest
+is designed, not yet built. v1's
 otosound, which this ports, was built and tested on v1's kernel.
 
 ## Problem Statement
@@ -660,7 +663,7 @@ Fixed on oto's `main` and still in v3.5.1:
 
 ([sfx: how sfx, otosound and the headless backend are tested on v2](https://github.com/dvoyni/cog/issues/951))
 
-**No test opens a real device.** The fake device stands in for oto behind otosound's private interface, set by the package's own tests on the plugin they build: it can refuse the open, report a machine with no output device whose open and play succeed anyway (oto's Windows null context, which is unexported and cannot be reached any other way), refuse to play, be unplugged, be plugged back in, gain a device, and settle a rate or buffer other than the one asked for, and it counts its probes, opens, plays and closes. A test needing a sound card could not run in CI, and a process has one oto context to spend: a test that spent it would spend it for every test after it in the binary.
+**No test opens a real device.** The fake device stands in for oto behind otosound's private interface, set by the package's own tests on the plugin they build: it can refuse the open, report a machine with no output device whose open and play succeed anyway (oto's Windows null context, which is unexported and cannot be reached any other way), refuse to play, be unplugged, be plugged back in, gain a device, and settle a rate or buffer other than the one asked for, and it counts its probes, opens, plays and closes, and logs every call, unguarded (see *Concurrency under `go test -race`* below). A test needing a sound card could not run in CI, and a process has one oto context to spend: a test that spent it would spend it for every test after it in the binary.
 
 **The obligation proofs are plain package tests, rendering into a buffer.** The mixer is an `io.Reader`, so a test reads blocks out of it, as oto would, and asserts on frames. Each obligation is proved in this package:
 
@@ -686,12 +689,22 @@ Items 7 and 9 hold by the types they are: a prepared clip holds Go memory alone,
 
 **The fixture** is `testdata/pianoroll.ogg`, the first 48,704 frames (1.104399 s, stereo, 44.1 kHz) of *Pleasant Moments Piano Roll* from Wikimedia Commons, public domain, cut at an Ogg page boundary with nothing re-encoded, its attribution beside it. The headless backend holds its own copy, so a test asserts that the two backends report one clip identically. At 44.1 kHz against a 48 kHz device it also exercises the conversion.
 
-**Concurrency under `go test -race`,** run in WSL on Windows. Each test is checked by breaking what it guards, an atomic store or a mutex replaced by a plain access, and seeing it fail. They replace v1's `-count=10`, which stood in for a detector v1's environment lacked, its tests written so that a broken protocol shows as a lost or reordered operation. They cover:
+**Concurrency under `go test -race`,** run in WSL on Windows. Each test is checked by breaking what it guards, an atomic store or a mutex replaced by a plain access, a store moved before what it publishes, or a wait taken out, and seeing it fail. They replace v1's `-count=10`, which stood in for a detector v1's environment lacked, its tests written so that a broken protocol shows as a lost or reordered operation: the whole suite runs under the detector, and a broken guard shows as a race it reports. They are:
 
-- the handoff ring between the flush and the device thread: no operation is lost or reordered while the flush side publishes and the mixer drains together;
-- the read-ahead goroutines filling their rings while the mixer reads them, and their halting;
-- the prepare goroutine, its completions drained through `TakePrepared` while others finish;
-- the device goroutine storing the `Device`, recording its first failure and logging, while the flush reads `Device()`.
+| What runs together | Test | Seen failing with |
+|---|---|---|
+| The handoff ring: the flush side publishing while the mixer drains, no operation lost or reordered | `TestNoOperationIsLostWhenTheFlushAndTheMixerRunTogether` | the write index or the applied counter stored by a plain write; the write index stored before the change list is swapped into its slot |
+| The handoff ring's pulled flag and its emptying: the flush emitting while the device goroutine detaches the ring on a loss, empties it, and attaches it again | `TestEmitAndALossRunningTogetherShareTheRingSafely` | the pulled flag stored by a plain write |
+| A read-ahead filling a ring far shorter than its loop while the mixer reads it, no frame torn, repeated or dropped | `TestTheReadAheadFillsItsRingWhileTheMixerReadsIt` | the produced count or the frame the mixer passed stored by a plain write; the produced count stored before the frames are copied |
+| A read-ahead publishing a one-shot's length while the mixer reads its ring, the voice ending on the frame its clip runs out on | `TestAStreamedOneShotEndsOnItsLastFrameWhileItsReadAheadFillsItsRing` | the length, the produced count or the frame the mixer passed stored by a plain write; the produced count stored before the frames are copied |
+| A read-ahead halted while it fills, by its slot's stop and by the start that replaces it | `TestTheReadAheadStopsWithItsVoice` | the halt a plain flag in place of the channel it closes once |
+| `Destroy` halting every read-ahead mid-read, and waiting for them | `TestDestroyHaltsEveryReadAhead` | the wait taken out of `Destroy` |
+| The prepare goroutines finishing while the flush drains `TakePrepared` | `TestTakePreparedDrainsEveryCompletionWhileOthersFinish` | the completions' mutex taken out of the prepare goroutine, or out of `TakePrepared` |
+| `Destroy` waiting for the prepares in flight | `TestDestroyWaitsForThePreparesInFlight` | the wait taken out of `Destroy` |
+| The device goroutine storing the `Device`, recording its first failure and logging it, while the flush reads `Device()` and logs reports of its own through the same Logger | `TestTheDeviceGoroutineLogsAndStoresTheDeviceWhileTheFlushReadsIt` | the `Device` stored by a plain write; the mutex taken out of the kernel Logger's record of what it logged once |
+| `Destroy` stopping the device goroutine and waiting for it before it closes the player, so nothing of the goroutine's reaches the device or the Logger once the kernel is gone | `TestDestroyStopsTheDeviceGoroutineBeforeItClosesThePlayer` | the wait taken out of the device goroutine's stop |
+
+The fake device keeps a log of its calls unguarded, as oto's device keeps its player, so the detector sees any call otosound does not order: `Voices`' take before the device goroutine's calls, and `Destroy`'s close after the goroutine has returned. Each test, run alone, fails with each break in its row. In the whole suite a break can show first in another test that meets it, since the detector reports one race once in a process.
 
 Under the detector, a test that counts allocations skips its count, since the race runtime allocates on its own; the counts run in a plain `go test`. jfreymuth/pulse#53 shows only against a real PulseAudio server, which no test opens, and is recorded as known (*oto's open issues*).
 
