@@ -48,3 +48,13 @@ type LiveVoices = liveVoices
 // mutators, and the flush alone writes it. A path is read once, at the flush
 // that first names it, and the clip shared by every voice that plays it.
 type ClipTable = clipTable
+
+// Listener is the resource of where the game is heard from, as of the last
+// flush: read it under kernel.Read[sfx.Listener]. It has no mutators: the
+// game moves it by recording SetListener on the Queue, and the flush alone
+// writes it. There is one, at the origin with no rotation before any call.
+//
+// sfx never reads a camera. A game copies a camera's transform across, its
+// Position and Rotation, so the listener follows one only because the game
+// says so.
+type Listener = listener

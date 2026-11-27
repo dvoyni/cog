@@ -11,6 +11,28 @@
 // It reads the live voices from LiveVoices. Package sfxtest runs sfx in a
 // real kernel over the headless backend, for tests.
 //
+// A voice given a Position in VoiceOptions is positional for the rest of its
+// life, heard from the one listener the game places with Queue.SetListener
+// and reads back from Listener: quieter with distance by its Falloff, off
+// its axis by its Cone when it has an Orientation, and panned by W3C's
+// equal-power equations, which sfx computes. A voice with no position is
+// heard centred. The axes are right-handed, forward -Z, up +Y and right +X,
+// and the units are the game's: set Falloff.Ref to the world's scale, since
+// W3C's default of 1 makes a source 10 units away -20 dB. A stereo clip is
+// panned, not mixed down to mono: one channel passes at unity and the other
+// bleeds into it, so a stereo clip panned hard right is its left channel
+// folded into its right ear. Whether a positional clip should be mono is the
+// game's judgement.
+//
+// A 2D game passes m.Vec3{X: x, Y: y} and rotates its listener once, so a
+// sprite's Y is front and back rather than nothing:
+//
+//	queue.SetListener(sfx.ListenerOptions{Orientation: m.Some(m.QuatRotationX(-math.Pi / 2))})
+//
+// and turns a directional emitter θ in-plane with the same rotation,
+// m.QuatRotationZ(θ).Mul(m.QuatRotationX(-math.Pi / 2)), facing up the
+// screen at θ of 0.
+//
 // BackendSocket is the seam. A backend is told how many slots exist once,
 // receives one FlushChanges per flush, multiplies a gain matrix it did not
 // compute, prepares the clips whose bytes it is handed, and answers the

@@ -28,7 +28,7 @@ func makeQueue(maxVoices int) queue {
 // in the flush that applies it, never having been live.
 func (q queue) Play(path string, offset time.Duration, options VoiceOptions) Voice {
 	voice := q.mintVoice()
-	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset})
+	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset, options: options})
 	return voice
 }
 
@@ -41,6 +41,16 @@ func (q queue) Stop(voice Voice) {
 		return
 	}
 	q.state.operations = append(q.state.operations, operation{kind: operationStop, voice: voice})
+}
+
+// SetListener records where the game is heard from: each field options
+// states moves the listener, and an absent one leaves it as it is. It is
+// coalesced field by field, the last value recorded before a flush winning,
+// so a job that moves the listener and one that turns it do not overwrite
+// each other. Every positional voice the listener moved relative to is
+// restated to the backend at that flush, with no operation naming it.
+func (q queue) SetListener(options ListenerOptions) {
+	q.state.listener = q.state.listener.merge(options)
 }
 
 // mintVoice answers the next handle: a free slot's next generation, or, at a
@@ -62,6 +72,8 @@ func (q queue) mintVoice() Voice {
 type queueState struct {
 	// operations are the operations recorded since the last flush, in order.
 	operations []operation
+	// listener is every SetListener recorded since the last flush, merged.
+	listener ListenerOptions
 	// generations is each slot's current generation, starting at 0 so the
 	// first handle a slot hands out is generation 1.
 	generations []uint32
@@ -89,7 +101,9 @@ const (
 type operation struct {
 	kind  operationKind
 	voice Voice
-	// path and offset are a play's clip and where in it the voice begins.
-	path   string
-	offset time.Duration
+	// path, offset and options are a play's clip, where in it the voice
+	// begins, and how it starts.
+	path    string
+	offset  time.Duration
+	options VoiceOptions
 }

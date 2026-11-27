@@ -11,14 +11,16 @@ import (
 // which is what applying a flush atomically means in lock terms: no recorder
 // is mid-append while the queue is drained, and no reader sees half a flush's
 // voices. In order, it applies the operations recorded, a clip named for the
-// first time read and prepared there; advances every playhead by delta; hands
-// the backend the flush's changes; frees the slots whose voices ended, only
-// now that their stops are handed over, for the next flush's plays; and
-// publishes each ending.
-func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
+// first time read and prepared there, and then the listener, coalesced;
+// advances every playhead by delta; runs the W3C equations over every live
+// voice against the listener; hands the backend the flush's changes; frees
+// the slots whose voices ended, only now that their stops are handed over,
+// for the next flush's plays; and publishes each ending.
+func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], listenerHandle kernel.Write[Listener], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
 	queue := queueHandle.Get()
 	voices := voicesHandle.Get()
 	clips := clipsHandle.Get()
+	heardFrom := listenerHandle.Get()
 	state := stateHandle.Get()
 	backend := state.backend.Get()
 	state.changes.reset()
@@ -32,7 +34,11 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 		}
 	}
 	queue.state.operations = queue.state.operations[:0]
+	heardFrom.apply(queue.state.listener)
+	listenerHandle.Set(heardFrom)
+	queue.state.listener = ListenerOptions{}
 	voices.advance(delta, &state.endings)
+	voices.spatialize(heardFrom)
 	voices.collect(&state.changes)
 	backend.Emit(&state.changes)
 	queue.state.freeSlots = voices.appendFreeSlots(queue.state.freeSlots[:0])

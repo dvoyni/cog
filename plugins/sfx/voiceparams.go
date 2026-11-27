@@ -1,7 +1,5 @@
 package sfx
 
-import "math"
-
 // VoiceParams is everything about how a voice sounds, as a backend sees it:
 // sixteen bytes, and no equation below the seam.
 type VoiceParams struct {
@@ -16,15 +14,4 @@ type VoiceParams struct {
 	// than a verb because zeroing a gain does not suspend: a resident buffer
 	// started from its head keeps advancing whatever its gain is.
 	Paused bool
-}
-
-// makeCentredVoiceParams answers the params of a voice heard centred, at
-// unity and at its clip's own rate: W3C's equal-power panning at azimuth 0,
-// which leaves a stereo clip on its own diagonal and puts a mono clip at
-// cos(π/4) in each ear rather than unity in both.
-func makeCentredVoiceParams(channels int) VoiceParams {
-	if channels >= 2 {
-		return VoiceParams{Gains: [2][2]float32{{1, 0}, {0, 1}}, Rate: 1}
-	}
-	return VoiceParams{Gains: [2][2]float32{{math.Sqrt2 / 2, math.Sqrt2 / 2}}, Rate: 1}
 }
