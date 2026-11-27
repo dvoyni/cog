@@ -98,9 +98,12 @@ type Plugin struct {
 	// status is the Device as it is now: the device goroutine writes it, and
 	// the flush reads it with no notice when it changes.
 	status atomic.Pointer[sfx.Device]
-	// deviceGoroutine is the device goroutine, which Destroy waits for
-	// before it closes the player.
-	deviceGoroutine sync.WaitGroup
+	// deviceGoroutine is the device goroutine, which Voices starts and
+	// Destroy stops before it closes the player.
+	deviceGoroutine deviceGoroutine
+	// logger is the kernel's, kept from Init, which the device goroutine
+	// logs otosound's device reports through.
+	logger *kernel.Logger
 	// finishedPreparesMutex guards finishedPrepares, the prepares finished
 	// since the last TakePrepared, which the prepare goroutines append to.
 	// It is the backend's only lock, and nothing the mixer runs can reach it.
@@ -122,12 +125,13 @@ func (*Plugin) Name() kernel.PluginName { return PluginName }
 func (*Plugin) Dependencies() []kernel.PluginName { return nil }
 
 // Init reads the config, fills in its defaults, makes the clip table, sets
-// the Device not ready and named "otosound", and binds sfx.BackendSocket to
-// the backend. It opens nothing, so it never fails on a device: sfx's Start
-// opens it, through the backend's Voices. A config of another type than
-// *Config is a composition error, and panics, as does a field out of its
-// range: a negative SampleRate, BufferSize, RingDepth, ReadAhead, RefillWait
-// or DeviceRetry, or a DecodedClipLimit below -2, which names no tier.
+// the Device not ready and named "otosound", keeps the kernel's Logger, and
+// binds sfx.BackendSocket to the backend. It opens nothing, so it never
+// fails on a device: sfx's Start opens it, through the backend's Voices. A
+// config of another type than *Config is a composition error, and panics, as
+// does a field out of its range: a negative SampleRate, BufferSize,
+// RingDepth, ReadAhead, RefillWait or DeviceRetry, or a DecodedClipLimit
+// below -2, which names no tier.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	givenConfig := kernel.PluginConfigOrDefault[Config](config)
 	checkNotNegative("SampleRate", givenConfig.SampleRate)
@@ -151,6 +155,9 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	p.outputSampleRate = p.config.SampleRate
 	p.clips = map[sfx.ClipID]*preparedClip{}
 	p.status.Store(&sfx.Device{Name: string(PluginName)})
+	p.logger = configurator.Logger()
+	p.deviceGoroutine.plugin = p
+	p.deviceGoroutine.stopping = make(chan struct{})
 	configurator.BindSocket[sfx.BackendSocket](backend{plugin: p})
 	return nil
 }
@@ -163,13 +170,14 @@ func (*Plugin) Start(*kernel.Kernel) error { return nil }
 // its jobs, so the player stays open until Destroy.
 func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 
-// Destroy waits for the prepares in flight and the device goroutine, and
-// then closes this kernel's player, which stops reading the mixer before it
-// returns, so a destroyed kernel leaves nothing of otosound's running. The
-// oto context stays open, for the kernels after.
+// Destroy waits for the prepares in flight, stops the device goroutine and
+// waits for it, so nothing logs after the kernel is gone, and then closes
+// this kernel's player, which stops reading the mixer before it returns, so
+// a destroyed kernel leaves nothing of otosound's running. The oto context
+// stays open, for the kernels after.
 func (p *Plugin) Destroy() error {
 	p.prepareGoroutines.Wait()
-	p.deviceGoroutine.Wait()
+	p.deviceGoroutine.stop()
 	p.device.close()
 	return nil
 }

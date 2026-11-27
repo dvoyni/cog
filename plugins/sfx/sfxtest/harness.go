@@ -1,6 +1,7 @@
 package sfxtest
 
 import (
+	"maps"
 	"slices"
 	"sync"
 	"testing"
@@ -54,18 +55,30 @@ type Harness struct {
 	// pluginBackend is set by UsePluginBackend, for the harness's plugin to
 	// bind no backend.
 	pluginBackend bool
+	// configs are the configs Configure gave, by plugin, which Spawn puts in
+	// the kernel's config beside sfx's and metronome's.
+	configs map[kernel.PluginName]any
 	// reading is what Read hands the views to, set while it waits for its
 	// job.
 	reading func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener, device sfx.DeviceView)
 	// mutex guards records, the bodies Record queued for the next step,
 	// which the harness's recording task takes; endings, every
-	// VoiceEndedEvent published; reports, every error logged; and
-	// checkedCount, how many of reports the harness has checked.
+	// VoiceEndedEvent published; reports, every error logged; warnings,
+	// every warning logged; and checkedCount, how many of reports the
+	// harness has checked.
 	mutex        sync.Mutex
 	records      []func(queue sfx.Queue)
 	endings      []sfx.VoiceEndedEvent
 	reports      []error
+	warnings     []Warning
 	checkedCount int
+}
+
+// Warning is one warning the kernel logged: its message, and its args as
+// alternating keys and values, as log/slog takes them.
+type Warning struct {
+	Message string
+	Args    []any
 }
 
 // NewHarness answers a harness whose kernel is not yet spawned. When the test
@@ -74,9 +87,10 @@ type Harness struct {
 func NewHarness(t testing.TB) *Harness {
 	t.Helper()
 	h := &Harness{
-		t:      t,
-		clock:  metronome.NewManualClock(),
-		memory: filesystems.NewMemoryFS(),
+		t:       t,
+		clock:   metronome.NewManualClock(),
+		memory:  filesystems.NewMemoryFS(),
+		configs: map[kernel.PluginName]any{},
 	}
 	h.supervisor = kernel.NewSupervisor(logHandler{harness: h})
 	t.Cleanup(h.quit)
@@ -97,15 +111,15 @@ func (h *Harness) UseBackend(backend sfx.BackendSocket) {
 
 // Spawn spawns platform, metronome, sfx with config, the harness's own
 // plugin and plugins, in that order, so the test's plugins are listed after
-// sfx. It fails the test when the spawn fails.
+// sfx, each with the config Configure gave it. It fails the test when the
+// spawn fails.
 func (h *Harness) Spawn(config *sfx.Config, plugins ...kernel.Plugin) {
 	h.t.Helper()
-	configs := map[kernel.PluginName]any{
-		sfx.PluginName: config,
-		metronome.PluginName: &metronome.Config{
-			Clock:  h.clock,
-			Tracks: []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(int(time.Second / StepInterval)))},
-		},
+	configs := maps.Clone(h.configs)
+	configs[sfx.PluginName] = config
+	configs[metronome.PluginName] = &metronome.Config{
+		Clock:  h.clock,
+		Tracks: []metronome.Track{metronome.NewTrack[metronome.UpdateEvent](metronome.FixedStep(int(time.Second / StepInterval)))},
 	}
 	stack := []kernel.Plugin{platform.NewPlugin(), metronome.NewPlugin(), sfx.NewPlugin(), harnessPlugin{harness: h}}
 	id, err := h.supervisor.Spawn(configs, workerCount, append(stack, plugins...)...)
@@ -124,6 +138,21 @@ func (h *Harness) UsePluginBackend() {
 		h.t.Fatal("sfxtest: leaving the backend to a plugin after Spawn")
 	}
 	h.pluginBackend = true
+}
+
+// Configure puts config under name in the kernel's config, for a plugin
+// among the test's: otosound's *otosound.Config, say, with a short
+// DeviceRetry. It is called before Spawn, and fails the test after it, or
+// for sfx or metronome, whose configs Spawn gives.
+func (h *Harness) Configure(name kernel.PluginName, config any) {
+	h.t.Helper()
+	if h.kernel != nil {
+		h.t.Fatal("sfxtest: Configure was called after Spawn")
+	}
+	if name == sfx.PluginName || name == metronome.PluginName {
+		h.t.Fatalf("sfxtest: Configure was given %s's config, which Spawn gives", name)
+	}
+	h.configs[name] = config
 }
 
 // Mount puts data in the memory mount as the file path, which a play then
@@ -175,6 +204,15 @@ func (h *Harness) Reports() []error {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	return slices.Clone(h.reports)
+}
+
+// Warnings answers every warning the kernel has logged so far, in the order
+// logged, such as a backend's device that could not be opened. A warning
+// fails no test.
+func (h *Harness) Warnings() []Warning {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return slices.Clone(h.warnings)
 }
 
 // Read calls read with sfx's views, in a job holding their read locks, and

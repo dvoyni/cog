@@ -3,6 +3,7 @@
 package otosound
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -10,13 +11,23 @@ import (
 )
 
 // spawnHandoff answers the backend of a kernel composing sfx and otosound
-// over a fake device that never pulls, and its plugin, so a test emits and
-// drains by hand. Nothing steps the kernel, so no flush emits beside the
-// test.
+// over a fake device whose open is refused, so no player ever pulls the
+// ring, and its plugin, so a test emits and drains by hand. Nothing steps
+// the kernel, so no flush emits beside the test.
 func spawnHandoff(t *testing.T) (backend, *Plugin) {
 	t.Helper()
-	_, plugin := spawnOverFake(t, &fakeDevice{})
+	_, plugin := spawnOverFake(t, &fakeDevice{openErr: errors.New("no device in this test")})
 	return backend{plugin: plugin}, plugin
+}
+
+// spawnPulledHandoff is spawnHandoff with the ring attached, as once a
+// player plays, so a destroyed clip is held against the applied counter and
+// a full ring merges into the staging changes rather than discards them.
+func spawnPulledHandoff(t *testing.T) (backend, *Plugin) {
+	t.Helper()
+	b, plugin := spawnHandoff(t)
+	plugin.mixer.ring.pulled.Store(true)
+	return b, plugin
 }
 
 // drained drains ring as the mixer does, and answers the operations it
@@ -72,7 +83,7 @@ func pendingCount(ring *handoffRing) uint64 {
 // and in order rather than coalesced: two flushes' operations taking effect
 // at one instant is correct, since they were ordered and stay ordered.
 func TestEveryFlushsPublishedChangesAreAppliedWholeAndInOrder(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	gains := [2][2]float32{{0.5, 0.5}}
 	for clipID := sfx.ClipID(1); clipID <= 3; clipID++ {
 		b.Emit(&sfx.FlushChanges{
@@ -106,7 +117,7 @@ func TestEveryFlushsPublishedChangesAreAppliedWholeAndInOrder(t *testing.T) {
 // publishes them once there is room, so draining delivers every play in
 // order.
 func TestAFullRingMergesIntoStagingRatherThanBlockingOrDropping(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	depth := plugin.config.RingDepth
 	total := depth * 3
 
@@ -135,7 +146,7 @@ func TestAFullRingMergesIntoStagingRatherThanBlockingOrDropping(t *testing.T) {
 // the failing sequence four kind-by-kind slices cannot express once two
 // flushes have been merged, and why a change list is an ordered one.
 func TestAStartAfterAStopOnOneSlotSurvivesTheMerge(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	for clipID := 1; clipID <= plugin.config.RingDepth; clipID++ {
 		emitStart(b, sfx.ClipID(clipID))
 	}
@@ -152,7 +163,7 @@ func TestAStartAfterAStopOnOneSlotSurvivesTheMerge(t *testing.T) {
 // merge covers. A start and a stop never coalesce: they are what sfx's
 // contract promises not to lose.
 func TestAMergeCoalescesUpdatesAndKeepsStartsAndStops(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	for clipID := 1; clipID <= plugin.config.RingDepth; clipID++ {
 		emitStart(b, sfx.ClipID(clipID))
 	}
@@ -178,7 +189,7 @@ func TestAMergeCoalescesUpdatesAndKeepsStartsAndStops(t *testing.T) {
 // go, so it does not move before the changes it counts have been applied
 // whole.
 func TestTheAppliedCounterOnlyMovesOnceARingSlotsChangesHaveBeenApplied(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	emitStart(b, 1)
 	if applied := plugin.mixer.ring.applied.Load(); applied != 0 {
 		t.Fatalf("the applied counter is %d before any block", applied)
@@ -199,7 +210,7 @@ func TestTheAppliedCounterOnlyMovesOnceARingSlotsChangesHaveBeenApplied(t *testi
 // the stop lands on the voice it was meant for rather than on the one that
 // replaced it, which it would otherwise fade out before it was heard.
 func TestAStolenSlotIsStoppedBeforeTheStartThatReusesIt(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	b.Emit(&sfx.FlushChanges{
 		Starts: []sfx.VoiceStart{{Slot: 0, Clip: 1}},
 		Stops:  []sfx.VoiceSlot{0},
@@ -215,7 +226,7 @@ func TestAPlayAllocatesNothingInTheBackend(t *testing.T) {
 	if raceEnabled {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	clipID, _ := installClip(t, b)
 	changes := &sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: clipID}}}
 	block := make([]byte, 480*bytesPerFrame)
@@ -237,7 +248,7 @@ func TestAPlayAllocatesNothingInTheBackend(t *testing.T) {
 // sides unordered.
 func TestNoOperationIsLostWhenTheFlushAndTheMixerRunTogether(t *testing.T) {
 	const total = 4000
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	flushed := make(chan struct{})
 	go func() {
 		defer close(flushed)
@@ -259,6 +270,44 @@ func TestNoOperationIsLostWhenTheFlushAndTheMixerRunTogether(t *testing.T) {
 		}
 	}
 	<-flushed
+	applied = append(applied, drained(plugin.mixer.ring)...)
+
+	wantStartsInOrder(t, applied, total)
+}
+
+// While no player pulls the ring, before this kernel's player first plays or
+// after a lost device, Emit publishes nothing, neither into the ring nor into
+// the staging changes: sfx restates every live voice once the device turns
+// ready, so nothing is lost, and a ring nobody drains holds nothing and keeps
+// no clip alive.
+func TestARingNoPlayerPullsHoldsNothing(t *testing.T) {
+	b, plugin := spawnHandoff(t)
+	for clipID := sfx.ClipID(1); clipID <= sfx.ClipID(plugin.config.RingDepth+2); clipID++ {
+		emitStart(b, clipID)
+	}
+
+	if pending := pendingCount(plugin.mixer.ring); pending != 0 {
+		t.Fatalf("%d flushes' changes were published to a ring no player pulls", pending)
+	}
+	if staged := plugin.mixer.ring.staging.operations; len(staged) != 0 {
+		t.Fatalf("the staging changes hold %+v, want nothing", staged)
+	}
+}
+
+// The ring is pulled before the Device turns ready, so a flush that sees it
+// ready, and restates every live voice, never finds its changes discarded
+// for a mixer that has not drained its first block yet.
+func TestChangesStagedOnceTheDeviceIsReadyAreNeverDiscarded(t *testing.T) {
+	_, plugin := spawnOverFake(t, &fakeDevice{})
+	waitForReady(t, plugin)
+	b := backend{plugin: plugin}
+	total := plugin.config.RingDepth * 3
+
+	for clipID := 1; clipID <= total; clipID++ {
+		emitStart(b, sfx.ClipID(clipID))
+	}
+	applied := drained(plugin.mixer.ring)
+	b.Emit(&sfx.FlushChanges{})
 	applied = append(applied, drained(plugin.mixer.ring)...)
 
 	wantStartsInOrder(t, applied, total)

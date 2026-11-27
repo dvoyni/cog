@@ -1172,12 +1172,14 @@ testing story; it is the testing story.
   - `NewHarness(t)` and `Spawn(config, plugins...)`, composing platform with a memory mount, sfx with the given `*sfx.Config`, the headless backend unless `UseBackend` or `UsePluginBackend` says otherwise, and metronome on a `ManualClock`, the test's plugins after them;
   - `UseBackend(backend sfx.BackendSocket)`, before `Spawn`, binding a fake backend instead of the headless one, for the tests of a device not ready, a device arriving and prepares answering `done=false`;
   - `UsePluginBackend()`, before `Spawn`, binding no backend, so a plugin among the test's binds the socket, after rendertest's `UseSoftwareAdapter`: otosound's kernel tests use it with otosound's plugin over its fake device;
+  - `Configure(name kernel.PluginName, config any)`, before `Spawn`, putting a plugin of the test's config into the kernel's config: otosound's kernel tests give otosound's `*Config` with it, a short `DeviceRetry` or another rate;
   - `Mount(path, bytes)`, putting clip bytes into the memory mount;
   - `Record(func(sfx.Queue))`, recording from the test for the next step, so a test records without writing a plugin;
   - `Step()`, which advances a fixed-step track on the `ManualClock`, its handler scheduling the recorders and then `Tasks.Flush` with the beat's `Delta + Lost`, as a game schedules it;
   - `Read(func(sfx.LiveVoices, sfx.ClipTable, sfx.BusVolumes, sfx.Listener, sfx.DeviceView))`, run in a job holding their read locks after a step, so a test reads the views;
   - `Endings()`, the `VoiceEndedEvent`s in the order they were published;
   - `Reports()`, the reports logged, from a `LogHandler` of the harness's own;
+  - `Warnings()`, the warnings logged, each its message and its args, which fail no test: a backend's device that could not be opened is one;
   - `ExpectError(match func(error) bool)`, naming an error the test expects: an error the test did not expect fails it, as rendertest's does.
 
   v1's probe plugins, its fixed `TimeStep` and its seven identical copies of an empty permanent-filesystem adapter go: v2's writable filesystem is optional, and harness packages are allowed where v1's architecture tests forbade a `soundtest`.

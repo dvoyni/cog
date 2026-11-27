@@ -31,7 +31,7 @@ func heldCount(plugin *Plugin) int {
 // the mixer can be mid-copy out of the clip for as long as it takes and never
 // reads it after it is freed, while the flush never waits.
 func TestAReleasedClipIsHeldUntilTheMixerHasPassedTheChangesThatDestroyedIt(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	clipID, clip := installClip(t, b)
 
 	b.Emit(&sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: clipID}}})
@@ -62,9 +62,8 @@ func TestAReleasedClipIsHeldUntilTheMixerHasPassedTheChangesThatDestroyedIt(t *t
 // A destroy merged into the staging changes of a full ring has no sequence
 // until they are published, and is held until they are, and then applied.
 func TestAReleaseMergedIntoAFullRingIsHeldUntilItsChangesAreApplied(t *testing.T) {
-	b, plugin := spawnHandoff(t)
+	b, plugin := spawnPulledHandoff(t)
 	clipID, _ := installClip(t, b)
-	drained(plugin.mixer.ring)
 	for startClipID := clipID + 1; startClipID <= clipID+sfx.ClipID(plugin.config.RingDepth); startClipID++ {
 		emitStart(b, startClipID)
 	}
@@ -95,5 +94,8 @@ func TestAReleasedClipIsFreedAtOnceWhileNoMixerHasEverPulled(t *testing.T) {
 
 	if held := heldCount(plugin); held != 0 {
 		t.Fatalf("%d released clips are held against a counter nothing will ever move", held)
+	}
+	if _, installed := plugin.clips[clipID]; installed {
+		t.Fatal("the destroyed clip is still in the clip table")
 	}
 }

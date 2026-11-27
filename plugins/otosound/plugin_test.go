@@ -19,10 +19,17 @@ import (
 // device, otosound binding sfx's socket, and otosound's plugin in it.
 func spawnOverFake(t testing.TB, device *fakeDevice) (*sfxtest.Harness, *Plugin) {
 	t.Helper()
+	return spawnConfiguredOverFake(t, device, nil)
+}
+
+// spawnConfiguredOverFake is spawnOverFake with config as otosound's.
+func spawnConfiguredOverFake(t testing.TB, device *fakeDevice, config *Config) (*sfxtest.Harness, *Plugin) {
+	t.Helper()
 	plugin := NewPlugin()
 	plugin.device = device
 	h := sfxtest.NewHarness(t)
 	h.UsePluginBackend()
+	h.Configure(PluginName, config)
 	h.Spawn(nil, plugin)
 	return h, plugin
 }
@@ -31,17 +38,8 @@ func spawnOverFake(t testing.TB, device *fakeDevice) (*sfxtest.Harness, *Plugin)
 // when it is not ready within sfxtest.Timeout.
 func waitForReady(t testing.TB, plugin *Plugin) sfx.Device {
 	t.Helper()
-	deadline := time.Now().Add(sfxtest.Timeout)
-	for {
-		device := backend{plugin: plugin}.Device()
-		if device.Ready {
-			return device
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the device is %+v after %v, want it ready", device, sfxtest.Timeout)
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitFor(t, "the Device turning ready", func() bool { return isReady(plugin) })
+	return backend{plugin: plugin}.Device()
 }
 
 // wantSilence fails the test unless a block read from device's player is
@@ -131,20 +129,22 @@ func TestTheDeviceIsNotReadyUntilThePlayerPlays(t *testing.T) {
 
 // A second kernel takes its own player on the process's context, and both
 // answer the settings the context's open answers in force, here those of a
-// context made earlier in the process, not those they asked for. Destroying
-// one closes its player alone: the other plays on.
+// context made earlier in the process, not those they asked for, which each
+// logs. Destroying one closes its player alone: the other plays on.
 func TestASecondKernelTakesItsOwnPlayerAndDestroyClosesOnlyIt(t *testing.T) {
 	settingsInForce := deviceSettings{sampleRate: 44100, bufferSize: 20 * time.Millisecond}
 	want := sfx.Device{Ready: true, Name: "otosound", SampleRate: settingsInForce.sampleRate, Channels: 2, Latency: settingsInForce.bufferSize}
 	firstDevice := &fakeDevice{settled: settingsInForce}
 	secondDevice := &fakeDevice{settled: settingsInForce}
 	h, firstPlugin := spawnOverFake(t, firstDevice)
+	h.ExpectError(isConfigIgnored)
 	if got := waitForReady(t, firstPlugin); got != want {
 		t.Errorf("the first kernel's device is %+v, want %+v", got, want)
 	}
 
 	t.Run("the second kernel, destroyed as it ends", func(t *testing.T) {
 		secondHarness, secondPlugin := spawnOverFake(t, secondDevice)
+		secondHarness.ExpectError(isConfigIgnored)
 		secondHarness.Step()
 		if got := waitForReady(t, secondPlugin); got != want {
 			t.Errorf("the second kernel's device is %+v, want %+v", got, want)

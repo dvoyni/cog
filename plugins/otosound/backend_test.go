@@ -93,7 +93,10 @@ func TestPrepareConvertsToTheDeviceRateWithoutReportingIt(t *testing.T) {
 		"the clip's own rate, left unchanged": {&fakeDevice{settled: deviceSettings{sampleRate: clipRate, bufferSize: defaultBufferSize}}, clipRate},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, plugin := spawnOverFake(t, test.device)
+			h, plugin := spawnOverFake(t, test.device)
+			// A rate an earlier kernel settled is this kernel's Config
+			// ignored, which is logged once as an error.
+			h.ExpectError(isConfigIgnored)
 			b := backend{plugin: plugin}
 			b.Prepare(nil, readFixture(t))
 
