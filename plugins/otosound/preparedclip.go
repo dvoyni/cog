@@ -16,14 +16,16 @@ import (
 // float32, which a clip's decoded size is counted in.
 const decodedSampleSize = 4
 
-// preparedClip is otosound's prepared clip, decoded once: its samples, which
-// every voice on it shares, and the facts sfx is told, its source's. It is Go
+// preparedClip is otosound's prepared clip, decoded once and converted to
+// the rate the mixer produces: its samples, which every voice on it shares,
+// and the facts sfx is told, its source's, never the device's. It is Go
 // memory alone, so a clip released while its prepare is in flight leaves
 // nothing unfreed. The encoded bytes it was decoded from are not kept, since
 // nothing reads them again.
 type preparedClip struct {
 	// samples are the clip's frames, interleaved, channels to a frame, at the
-	// source's rate: converting them to the device's is not built yet.
+	// rate the mixer produces, converted from the source's once, in Prepare:
+	// len(samples)/channels converted frames, which frames is not.
 	samples []float32
 	// frames is the clip's true length in its source's frames: the granule
 	// end where the decoder handed back more.
@@ -45,12 +47,14 @@ type preparedClip struct {
 // size, frames × channels × 4 bytes, is within decodedClipLimit,
 // Config.DecodedClipLimit with its default filled in: -1 is no limit, -2
 // decodes none, and a positive limit is the largest size still decoded. A
-// clip over it streams, which is not built yet, and fails with
-// errStreamingNotBuilt. Headers that will not parse answer ErrNotOggVorbis, a
-// rate or a channel count the mixer cannot play ErrNoStreamFormat, and a
-// length that reads zero ErrNoStreamLength. It runs on a prepare goroutine,
-// never on the flush or the device thread.
-func prepareClip(encoded []byte, decodedClipLimit int) (*preparedClip, error) {
+// decoded clip whose source's rate is not outputRate, the rate the mixer
+// produces, is converted to it, once, here. A clip over the limit streams,
+// which is not built yet, and fails with errStreamingNotBuilt. Headers that
+// will not parse answer ErrNotOggVorbis, a rate or a channel count the mixer
+// cannot play ErrNoStreamFormat, and a length that reads zero
+// ErrNoStreamLength. It runs on a prepare goroutine, never on the flush or
+// the device thread.
+func prepareClip(encoded []byte, decodedClipLimit, outputRate int) (*preparedClip, error) {
 	length, format, err := oggvorbis.GetLength(bytes.NewReader(encoded))
 	if err != nil {
 		return nil, ErrNotOggVorbis{Err: err}
@@ -65,14 +69,20 @@ func prepareClip(encoded []byte, decodedClipLimit int) (*preparedClip, error) {
 	if decodedClipLimit == decodedClipLimitAlwaysStream || decodedClipLimit != decodedClipLimitNone && decodedSize > int64(decodedClipLimit) {
 		return nil, errStreamingNotBuilt
 	}
-	return decodeClip(encoded, length)
+	clip, err := decodeClip(encoded, length)
+	if err != nil {
+		return nil, err
+	}
+	clip.samples = convertRate(clip.samples, clip.channels, clip.sampleRate, outputRate)
+	return clip, nil
 }
 
 // decodeClip decodes encoded up to granuleEnd, the last page's granule
 // position, and no further: what a decoder would hand back past it is a
 // final packet's padding. The loop region is read against the frames
 // decoded, so an absent region loops to the granule end and a LOOPEND is in
-// range only against it.
+// range only against it. Its samples are at the source's rate, which
+// prepareClip converts.
 func decodeClip(encoded []byte, granuleEnd int64) (*preparedClip, error) {
 	reader, err := oggvorbis.NewReader(bytes.NewReader(encoded))
 	if err != nil {

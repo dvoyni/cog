@@ -78,6 +78,11 @@ type Plugin struct {
 	device device
 	// config is the kernel's Config with every default filled in.
 	config Config
+	// outputSampleRate is the rate the mixer produces and every clip is
+	// converted to: the rate in force once Voices has taken the device,
+	// which a context an earlier kernel made settles, and Config's until
+	// then, or when the take failed. It is the flush side's alone.
+	outputSampleRate int
 	// mixer is what the device's player pulls.
 	mixer mixer
 	// clips is the clip table, every clip Install minted an ID for, under
@@ -143,6 +148,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		RefillWait:       cmp.Or(givenConfig.RefillWait, defaultRefillWait),
 		DeviceRetry:      cmp.Or(givenConfig.DeviceRetry, defaultDeviceRetry),
 	}
+	p.outputSampleRate = p.config.SampleRate
 	p.clips = map[sfx.ClipID]*preparedClip{}
 	p.status.Store(&sfx.Device{Name: string(PluginName)})
 	configurator.BindSocket[sfx.BackendSocket](backend{plugin: p})

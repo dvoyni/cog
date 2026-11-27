@@ -79,6 +79,43 @@ func TestPrepareDecodesOffTheFlushAndTheCompletionArrivesUnderItsToken(t *testin
 	}
 }
 
+// Prepare converts a clip to the device rate once, off both threads, so a
+// voice's rate is pitch alone and no base rate is resampled on the device
+// thread. What the clip answers is still its file's rate, so nothing above
+// the seam can tell, and a device change costs sfx's clip table nothing.
+func TestPrepareConvertsToTheDeviceRateWithoutReportingIt(t *testing.T) {
+	for name, test := range map[string]struct {
+		device *fakeDevice
+		rate   int
+	}{
+		"the rate asked for":                  {&fakeDevice{}, defaultSampleRate},
+		"the rate an earlier kernel settled":  {&fakeDevice{settled: deviceSettings{sampleRate: 96000, bufferSize: defaultBufferSize}}, 96000},
+		"the clip's own rate, left unchanged": {&fakeDevice{settled: deviceSettings{sampleRate: clipRate, bufferSize: defaultBufferSize}}, clipRate},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, plugin := spawnOverFake(t, test.device)
+			b := backend{plugin: plugin}
+			b.Prepare(nil, readFixture(t))
+
+			completion := waitPrepared(t, b, 1)[0]
+			if completion.Err != nil {
+				t.Fatalf("preparing the fixture: %v", completion.Err)
+			}
+			clip := completion.Clip.(*preparedClip)
+			if clip.SampleRate() != clipRate || clip.Duration() != clipDuration {
+				t.Fatalf("the clip reports %d Hz and %v s, want the file's %d and %v", clip.SampleRate(), clip.Duration(), clipRate, clipDuration)
+			}
+			if len(clip.samples)%clipChannels != 0 {
+				t.Fatalf("the clip holds %d samples, not a whole number of %d-channel frames", len(clip.samples), clipChannels)
+			}
+			want := clipFrames * test.rate / clipRate
+			if got := len(clip.samples) / clipChannels; got < want-2 || got > want+2 {
+				t.Fatalf("the clip holds %d frames, want about %d, its %d at %d Hz", got, want, clipFrames, test.rate)
+			}
+		})
+	}
+}
+
 // Both backends read one clip's facts identically: the fixture prepared here
 // and under the headless backend answers the same duration, channels, rate
 // and loop region, a malformed region's error included.
@@ -93,7 +130,7 @@ func TestOtosoundAndTheHeadlessBackendReportOneClipIdentically(t *testing.T) {
 			if err != nil {
 				t.Fatalf("preparing the clip under the headless backend: %v", err)
 			}
-			got, err := prepareClip(encoded, defaultDecodedClipLimit)
+			got, err := prepareClip(encoded, defaultDecodedClipLimit, defaultSampleRate)
 			if err != nil {
 				t.Fatalf("preparing the clip under otosound: %v", err)
 			}

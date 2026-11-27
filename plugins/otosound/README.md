@@ -12,10 +12,11 @@ silence, the `Device` ready once it plays, and the player closed in
 and drained whole at a block start, a full ring merging into the staging
 changes, and a destroyed clip held until the mixer has passed it; and
 `Prepare`'s decoded tier, a clip within `DecodedClipLimit` decoded once on a
-goroutine, with its loop region, and installed. A clip over the limit fails
-its prepare until streaming is built. The rate conversion, the mixer's
-voices, streaming, and the device's probe, retry and reports are designed,
-not yet built. The design is in
+goroutine, with its loop region, converted there to the device's rate with a
+windowed sinc while still answering its own, and installed. A clip over the
+limit fails its prepare until streaming is built. The mixer's voices,
+streaming, and the device's probe, retry and reports are designed, not yet
+built. The design is in
 [`docs/design.md`](docs/design.md), and the build on the
 [sfx map](https://github.com/dvoyni/cog/issues/945).
 
@@ -42,5 +43,5 @@ not yet built. The design is in
   device and starts this kernel's player; its `Emit` publishes each flush's
   changes to the mixer, never waiting on it; its `Device` answers the device
   as it is now, with one atomic load; its `Prepare` decodes a clip on a
-  goroutine of its own, its completion drained by `TakePrepared` and its ID
-  minted by `Install`.
+  goroutine of its own and converts it to the device's rate there, its
+  completion drained by `TakePrepared` and its ID minted by `Install`.
