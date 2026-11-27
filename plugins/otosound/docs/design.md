@@ -17,8 +17,10 @@ to the mixer, the per-block declick ramp, the offline resampler and the
 read-ahead goroutines are properties of code rather than of anything a game
 observes, and no test above the seam can see any of them.
 
-Status: designed; nothing is built. v1's otosound, which this ports, was built
-and tested on v1's kernel.
+Status: being built. The plugin, its `Config`, and an open device playing
+silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965);
+the rest is designed, not yet built. v1's otosound, which this ports, was
+built and tested on v1's kernel.
 
 ## Problem Statement
 
