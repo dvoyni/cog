@@ -98,6 +98,11 @@ func (h *Harness) UseBackend(backend sfx.BackendSocket) {
 // Spawn spawns platform, metronome, sfx with config, the harness's own
 // plugin and plugins, in that order, so the test's plugins are listed after
 // sfx. It fails the test when the spawn fails.
+//
+// The harness's plugin schedules sfx's flush on each beat itself, so a plugin
+// among plugins that schedules the flush too, as a game's own does, flushes a
+// second time each beat, advancing every playhead twice. Such a plugin stays
+// out, and what its recorders record is driven through Record.
 func (h *Harness) Spawn(config *sfx.Config, plugins ...kernel.Plugin) {
 	h.t.Helper()
 	configs := map[kernel.PluginName]any{
