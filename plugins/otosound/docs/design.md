@@ -17,37 +17,20 @@ to the mixer, the per-block declick ramp, the offline resampler and the
 read-ahead goroutines are properties of code rather than of anything a game
 observes, and no test above the seam can see any of them.
 
-Status: being built. The plugin, its `Config`, and an open device playing
-silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965),
-and the handoff ring with the releases held behind its applied counter, from
-[otosound: the handoff ring](https://github.com/dvoyni/cog/issues/967), and
-the mixer of resident voices, with *Declicking* and *Pause*, from
-[otosound: the mixer](https://github.com/dvoyni/cog/issues/969); so is the decoded tier of
-*Preparing a clip*, with *Loop regions*, from
-[otosound: resident clips decoded in Prepare](https://github.com/dvoyni/cog/issues/968):
-a clip within `DecodedClipLimit` is decoded on a prepare goroutine and
-installed in the clip table; the decoded tier's half of *Resampling*, from
-[otosound: resampling in Prepare](https://github.com/dvoyni/cog/issues/970):
-the prepare goroutine converts a decoded clip to the rate in force with the
-windowed sinc, the clip still answering its source's rate; the Windows
-probe, the retry, the poll for loss and the device reports, from
-[otosound: the Windows probe, the retry, loss and device reports](https://github.com/dvoyni/cog/issues/966),
-nothing published to a ring no player pulls; and *Streaming*, with the
-streamed tier of *Preparing a clip* and its half of *Resampling*, from
-[otosound: streamed clips and read-ahead rings](https://github.com/dvoyni/cog/issues/971):
-a clip over the limit, or any clip under the always-stream sentinel, keeps
-its bytes and the filter its voices share, and each voice on it decodes and
-converts into a read-ahead ring of its own on a goroutine, halted with its
-voice, by an `Emit` while no player pulls the ring, and by `Destroy`. A clip
-whose length reads zero still fails with `ErrNoStreamLength`, as under the
-headless backend, rather than streaming and being counted: such a stream's
-last page carries a granule position of zero, and the oggvorbis fork's
-`Reader.Read` panics on the last packet of one, its discard of the padding
-past the granule going negative. The concurrency tests of *Testing
-Decisions* are built too, from
-[otosound: race tests](https://github.com/dvoyni/cog/issues/972). The rest
-is designed, not yet built. v1's
-otosound, which this ports, was built and tested on v1's kernel.
+Status: built, every section, from the otosound tickets of the
+[sfx map](https://github.com/dvoyni/cog/issues/945):
+[the plugin](https://github.com/dvoyni/cog/issues/965),
+[the Windows probe, the retry, loss and device reports](https://github.com/dvoyni/cog/issues/966),
+[the handoff ring](https://github.com/dvoyni/cog/issues/967),
+[resident clips](https://github.com/dvoyni/cog/issues/968),
+[the mixer](https://github.com/dvoyni/cog/issues/969),
+[resampling](https://github.com/dvoyni/cog/issues/970),
+[streaming](https://github.com/dvoyni/cog/issues/971) and
+[the race tests](https://github.com/dvoyni/cog/issues/972). What stays
+unmeasured is stated where it falls: oto's behaviour on a device switch, in
+*Loss, the retry, and what it can recover*, and the 10 ms default on macOS
+and Linux, in *oto's open issues and known risks*. v1's otosound, which this
+ports, was built and tested on v1's kernel.
 
 ## Problem Statement
 
@@ -683,7 +666,7 @@ Fixed on oto's `main` and still in v3.5.1:
 
 Items 7 and 9 hold by the types they are: a prepared clip holds Go memory alone, and `Device()` is an atomic load.
 
-**otosound's other package tests** are v1's, case by case, on the same fake device and buffers: prepare decodes off the flush and its completion arrives under its token; it refuses bytes that are not Ogg Vorbis; `Install` mints a non-zero ID that never repeats; a play on a resident clip allocates nothing in the backend, `Emit` and a block together; the device is not ready until one opens; a clip under the limit is resident and one over it streams; the limit's sentinels choose the tier outright; a stream whose length reads zero is counted rather than believed; a streamed clip is frame for frame what the resident one would have been; a streamed voice plays the frames its read-ahead decoded, holds its playhead until its ring primes, plays silence for its slot alone on an underrun, ends when its read-ahead says the stream ran out, seeks in its read-ahead when started at an offset, and its read-ahead stops with it; and the loop region's tags are read as *Loop regions* states, a malformed region dropped whole and answered by `LoopRegionErr`, a resident clip trimmed to its granule end. A benchmark times a streamed voice opening its decoder.
+**otosound's other package tests** are v1's, case by case, on the same fake device and buffers: prepare decodes off the flush and its completion arrives under its token; it refuses bytes that are not Ogg Vorbis; `Install` mints a non-zero ID that never repeats; a play on a resident clip allocates nothing in the backend, `Emit` and a block together; the device is not ready until one opens; a clip under the limit is resident and one over it streams; the limit's sentinels choose the tier outright; a stream whose length reads zero is refused with `ErrNoStreamLength`; a streamed clip is frame for frame what the resident one would have been; a streamed voice plays the frames its read-ahead decoded, holds its playhead until its ring primes, plays silence for its slot alone on an underrun, ends when its read-ahead says the stream ran out, seeks in its read-ahead when started at an offset, and its read-ahead stops with it; and the loop region's tags are read as *Loop regions* states, a malformed region dropped whole and answered by `LoopRegionErr`, a resident clip trimmed to its granule end. A benchmark times a streamed voice opening its decoder.
 
 **A few kernel tests,** as v1's plugin tests did, compose sfx and otosound over the fake device. They ride on sfx's `sfxtest`: each calls `UsePluginBackend` before `Spawn`, so sfxtest binds no backend of its own, and spawns otosound's plugin, its fake device set, among the test's plugins, with the fixture put in sfxtest's memory mount by `Mount`. They assert that a game playing a real Ogg produces samples for the device, not silent, not clipping and in both channels; a device that cannot be opened is reported once and the game runs on, its voice alive and its `Device` not ready; a machine with no output device is reported once and the game runs on. `Init` panics on a config that is not a `*Config`, on a negative value in a field that takes none, and on a `DecodedClipLimit` below -2. What none of these can assert is that the samples sound right, which needs ears: v1's prototype judged the arithmetic, the ramp and pitch by resampling by ear.
 
