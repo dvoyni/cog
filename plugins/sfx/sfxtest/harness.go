@@ -30,13 +30,23 @@ const workerCount = 2
 // tests and those of a game's sound. Spawn spawns, through a
 // kernel.Supervisor, platform with a memory mount, metronome with a
 // fixed-step track on a metronome.ManualClock, sfx, the harness's own
-// plugin, which binds the headless backend, and the test's plugins after it;
-// Step steps one beat.
+// plugin, which binds the headless backend or the one UseBackend gave, and
+// the test's plugins after it; Step steps one beat.
+//
+// It is strict: the test fails on every error the kernel logged, checked
+// after each Step and when the test ends, unless a match given ExpectError
+// answers true of it.
 type Harness struct {
 	t          testing.TB
 	supervisor *kernel.Supervisor
 	kernel     *kernel.Kernel
 	clock      *metronome.ManualClock
+	// backend is what UseBackend gave, which the harness's plugin binds in
+	// place of a headless backend; nil without UseBackend.
+	backend sfx.BackendSocket
+	// errorMatches are the matches ExpectError was given; only the test's
+	// goroutine reads and writes them.
+	errorMatches []func(error) bool
 	// memory is the memory mount Mount puts clip bytes in, bound at the root
 	// of platform's FS.
 	memory *filesystems.MemoryFS
@@ -44,25 +54,41 @@ type Harness struct {
 	// job.
 	reading func(voices sfx.LiveVoices, clips sfx.ClipTable)
 	// mutex guards records, the bodies Record queued for the next step,
-	// which the harness's recording task takes, and endings, every
-	// VoiceEndedEvent published.
-	mutex   sync.Mutex
-	records []func(queue sfx.Queue)
-	endings []sfx.VoiceEndedEvent
+	// which the harness's recording task takes; endings, every
+	// VoiceEndedEvent published; reports, every error logged; and
+	// checkedCount, how many of reports the harness has checked.
+	mutex        sync.Mutex
+	records      []func(queue sfx.Queue)
+	endings      []sfx.VoiceEndedEvent
+	reports      []error
+	checkedCount int
 }
 
 // NewHarness answers a harness whose kernel is not yet spawned. When the test
-// ends, it quits the supervisor and waits for every kernel to be destroyed.
+// ends, it quits the supervisor, waits for every kernel to be destroyed, and
+// checks the errors logged.
 func NewHarness(t testing.TB) *Harness {
 	t.Helper()
 	h := &Harness{
-		t:          t,
-		supervisor: kernel.NewSupervisor(nil),
-		clock:      metronome.NewManualClock(),
-		memory:     filesystems.NewMemoryFS(),
+		t:      t,
+		clock:  metronome.NewManualClock(),
+		memory: filesystems.NewMemoryFS(),
 	}
+	h.supervisor = kernel.NewSupervisor(logHandler{harness: h})
 	t.Cleanup(h.quit)
 	return h
+}
+
+// UseBackend has the harness's plugin bind backend to sfx's BackendSocket in
+// place of a headless backend: a fake one, say, that answers its prepares
+// with done=false or reports a device that is not ready. It is called before
+// Spawn, and fails the test after it.
+func (h *Harness) UseBackend(backend sfx.BackendSocket) {
+	h.t.Helper()
+	if h.kernel != nil {
+		h.t.Fatal("sfxtest: UseBackend was called after Spawn")
+	}
+	h.backend = backend
 }
 
 // Spawn spawns platform, metronome, sfx with config, the harness's own
@@ -109,6 +135,7 @@ func (h *Harness) Record(record func(queue sfx.Queue)) {
 func (h *Harness) Step() {
 	h.t.Helper()
 	h.clock.Advance(StepInterval)
+	h.checkLogged()
 }
 
 // Endings answers every VoiceEndedEvent published so far, in the order
@@ -117,6 +144,22 @@ func (h *Harness) Endings() []sfx.VoiceEndedEvent {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	return slices.Clone(h.endings)
+}
+
+// ExpectError names errors the test expects, by match: an error that the
+// kernel logs and match answers true of fails no test, such as a clip's
+// failure the test causes on purpose. Each call adds a match, an error any
+// of them matches failing nothing.
+func (h *Harness) ExpectError(match func(error) bool) {
+	h.errorMatches = append(h.errorMatches, match)
+}
+
+// Reports answers every error the kernel has logged so far, expected or not,
+// in the order logged.
+func (h *Harness) Reports() []error {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	return slices.Clone(h.reports)
 }
 
 // Read calls read with sfx's views, in a job holding their read locks, and
@@ -152,7 +195,23 @@ func (h *Harness) noteEnding(ending sfx.VoiceEndedEvent) {
 	h.endings = append(h.endings, ending)
 }
 
-// quit quits the supervisor and waits until every kernel is destroyed.
+// checkLogged fails the test on each error logged since the last check, but
+// one an ExpectError match answers true of.
+func (h *Harness) checkLogged() {
+	h.t.Helper()
+	h.mutex.Lock()
+	unchecked := h.reports[h.checkedCount:]
+	h.checkedCount = len(h.reports)
+	h.mutex.Unlock()
+	for _, err := range unchecked {
+		if !slices.ContainsFunc(h.errorMatches, func(match func(error) bool) bool { return match(err) }) {
+			h.t.Errorf("the kernel logged %v, which the test did not expect", err)
+		}
+	}
+}
+
+// quit quits the supervisor, waits until every kernel is destroyed, and
+// checks the errors logged.
 func (h *Harness) quit() {
 	h.t.Helper()
 	h.supervisor.Quit()
@@ -161,4 +220,5 @@ func (h *Harness) quit() {
 	case <-time.After(Timeout):
 		h.t.Fatalf("sfxtest: the supervisor's quit did not finish in %v", Timeout)
 	}
+	h.checkLogged()
 }

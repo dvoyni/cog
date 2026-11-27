@@ -71,21 +71,20 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 		*endings = append(*endings, VoiceEndedEvent{Voice: play.voice, Reason: ReasonStolen})
 		return
 	}
-	state := slotWaiting
-	if clip.state == clipReady {
-		state = slotStarting
-	}
-	v.table.slots[index] = tableSlot{
-		state:    state,
+	slot := &v.table.slots[index]
+	*slot = tableSlot{
+		state:    slotWaiting,
 		voice:    play.voice,
 		path:     play.path,
 		offset:   play.offset,
 		playhead: play.offset,
-		clipID:   clip.id,
-		duration: clip.duration,
-		channels: clip.channels,
 	}
 	v.table.liveCount++
+	if clip.state == clipReady {
+		slot.bind(clip)
+	} else {
+		slot.playedThisFlush = true
+	}
 }
 
 // stop ends voice with ReasonStopped. It is a no-op on a voice that is gone,
@@ -94,6 +93,30 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 func (v liveVoices) stop(voice Voice, endings *[]VoiceEndedEvent) {
 	if slot := v.findSlot(voice); slot != nil {
 		v.end(slot, ReasonStopped, endings)
+	}
+}
+
+// resolve binds each voice waiting on a clip that clips now holds ready, and
+// ends with ReasonFailed each whose clip has failed, unless its play was
+// applied in this flush: a failure ends a voice one or more flushes after its
+// play and never in the same one, so a game cannot write "play it, and if it
+// fails this frame, do X".
+func (v liveVoices) resolve(clips clipTable, endings *[]VoiceEndedEvent) {
+	for index := range v.table.slots {
+		slot := &v.table.slots[index]
+		if slot.state != slotWaiting {
+			continue
+		}
+		playedThisFlush := slot.playedThisFlush
+		slot.playedThisFlush = false
+		switch clip := clips.state.entries[slot.path]; clip.state {
+		case clipReady:
+			slot.bind(clip)
+		case clipFailed:
+			if !playedThisFlush {
+				v.end(slot, ReasonFailed, endings)
+			}
+		}
 	}
 }
 
@@ -200,8 +223,11 @@ func (s slotState) live() bool {
 // voice, so a stale handle is told from the live one with one compare.
 type tableSlot struct {
 	state slotState
-	voice Voice
-	path  string
+	// playedThisFlush is a voice waiting on its clip whose play the flush
+	// running applied, which a failed clip does not end until the next.
+	playedThisFlush bool
+	voice           Voice
+	path            string
 	// offset is where in the clip the voice begins, and playhead where it is.
 	offset   time.Duration
 	playhead time.Duration
@@ -210,4 +236,16 @@ type tableSlot struct {
 	clipID   ClipID
 	duration time.Duration
 	channels int
+}
+
+// bind attaches the ready clip to the voice in the slot, which was waiting on
+// it, and owes the backend its start. The voice starts from its offset, with
+// no catch-up however long it waited: a 300 ms load must not play a
+// footstep's tail.
+func (s *tableSlot) bind(clip clipEntry) {
+	s.state = slotStarting
+	s.clipID = clip.id
+	s.duration = clip.duration
+	s.channels = clip.channels
+	s.playhead = s.offset
 }

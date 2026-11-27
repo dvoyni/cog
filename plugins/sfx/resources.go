@@ -15,7 +15,9 @@ type Tasks struct {
 	// changes in one Emit, and then publishes a VoiceEndedEvent for each
 	// voice that ended, in order. A clip's bytes are read inside it,
 	// synchronously, at the flush that first names the clip's path: it is the
-	// one place sfx can stall.
+	// one place sfx can stall. A prepare the backend finishes later is installed
+	// at the top of a later flush, the voices waiting on it starting there from
+	// their offsets.
 	//
 	// sfx schedules it nowhere. A game schedules it on each update beat,
 	// after its recorders, passing the beat's Delta plus its Lost, so the

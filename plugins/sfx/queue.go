@@ -23,9 +23,13 @@ func makeQueue(maxVoices int) queue {
 // voice exists from that flush, silent until its clip is ready.
 //
 // The clip is read through platform.FS at the flush that first names its
-// path, and shared by every voice playing it after. A play that finds every
-// slot taken still gets a real handle, and its voice ends with ReasonStolen
-// in the flush that applies it, never having been live.
+// path, and shared by every voice playing it after. A voice whose clip is not
+// ready yet waits on it, addressable and stoppable, and starts from offset
+// once it is, with no catch-up. A clip that cannot be read or prepared is
+// reported once under its path and ends its voices with ReasonFailed, a
+// flush or more after the play, never in the flush that applies it. A play
+// that finds every slot taken still gets a real handle, and its voice ends
+// with ReasonStolen in the flush that applies it, never having been live.
 func (q queue) Play(path string, offset time.Duration, options VoiceOptions) Voice {
 	voice := q.mintVoice()
 	q.state.operations = append(q.state.operations, operation{kind: operationPlay, voice: voice, path: path, offset: offset})
