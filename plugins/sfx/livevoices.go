@@ -65,23 +65,38 @@ func (v liveVoices) findSlot(voice Voice) *tableSlot {
 
 // start applies one recorded play of clip. The voice exists from here,
 // addressable and silent until its clip is ready, and then starts from its
-// offset. A play whose handle names no slot found every slot taken, and ends
-// here with ReasonStolen.
-func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedEvent) {
+// offset. A play whose handle names no slot found every slot taken and
+// nothing it outranked, and ends here with ReasonStolen.
+//
+// A play whose handle names a slot another voice still holds is a steal: the
+// queue chose that voice when the play was recorded, and it ends here with
+// ReasonStolen, the choice not remade. A voice the backend holds in the slot,
+// stolen now or ended earlier in this flush, is owed its stop, appended to
+// stops here, which the backend applies before the start that takes the slot
+// over: nothing of stealing crosses the seam but an ordinary stop.
+func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedEvent, stops *[]VoiceSlot) {
 	index := int(play.voice.index())
 	if index >= len(v.table.slots) {
 		*endings = append(*endings, VoiceEndedEvent{Voice: play.voice, Reason: ReasonStolen})
 		return
 	}
 	slot := &v.table.slots[index]
+	if slot.state.live() {
+		v.end(slot, ReasonStolen, endings)
+	}
+	if slot.state == slotStopping {
+		*stops = append(*stops, VoiceSlot(index))
+	}
+	v.table.startCount++
 	*slot = tableSlot{
-		state:    slotWaiting,
-		voice:    play.voice,
-		path:     play.path,
-		bus:      play.bus,
-		offset:   play.offset,
-		options:  play.options,
-		playhead: play.offset,
+		state:       slotWaiting,
+		voice:       play.voice,
+		path:        play.path,
+		bus:         play.bus,
+		offset:      play.offset,
+		options:     play.options,
+		playhead:    play.offset,
+		startNumber: v.table.startCount,
 	}
 	v.table.liveCount++
 	if clip.state == ClipReady {
@@ -255,22 +270,9 @@ func (v liveVoices) collect(changes *FlushChanges) {
 	}
 }
 
-// appendFreeSlots answers freeSlots with every slot no voice holds appended,
-// the last first, so a queue popping from its end hands out slot 0 first. It
-// is called once a flush's changes are collected, so a slot is stopped
-// before sfx reuses it.
-func (v liveVoices) appendFreeSlots(freeSlots []uint32) []uint32 {
-	for index := len(v.table.slots) - 1; index >= 0; index-- {
-		if v.table.slots[index].state == slotEmpty {
-			freeSlots = append(freeSlots, uint32(index))
-		}
-	}
-	return freeSlots
-}
-
 // end ends the live voice in slot for reason. A voice the backend holds keeps
-// its slot until the flush's changes are collected, so the backend gets its
-// stop; any other is emptied at once.
+// its slot until the flush's changes are collected, or a play takes the slot
+// over, so the backend gets its stop; any other is emptied at once.
 func (v liveVoices) end(slot *tableSlot, reason Reason, endings *[]VoiceEndedEvent) {
 	*endings = append(*endings, VoiceEndedEvent{Voice: slot.voice, Reason: reason})
 	v.table.liveCount--
@@ -286,6 +288,9 @@ type voiceTable struct {
 	slots []tableSlot
 	// liveCount is how many slots hold a live voice.
 	liveCount int
+	// startCount counts the plays the table has started, which stamps each
+	// voice's startNumber.
+	startCount uint64
 	// paused is the pause of every voice Queue.SetPaused recorded, one flag
 	// over the table rather than a voice's own, which each slot's options
 	// keep apart from it.
@@ -307,7 +312,8 @@ const (
 	// slotSounding holds a voice the backend holds in this slot.
 	slotSounding
 	// slotStopping holds a voice that ended in the flush running while the
-	// backend held it, owed a stop, until the flush's changes are collected.
+	// backend held it, owed a stop, until the flush's changes are collected
+	// or a play takes the slot over, either handing the backend the stop.
 	slotStopping
 )
 
@@ -334,6 +340,11 @@ type tableSlot struct {
 	// owesRestart is whether the backend holds the voice and restate marked
 	// it, so it is owed a VoiceStart at its playhead in place of an update.
 	owesRestart bool
+	// startNumber is the voice's place in the order the table started voices
+	// in, which "ties broken by age, oldest first" compares. It counts starts
+	// rather than flushes, since two voices played before one flush at one
+	// position tie on every other term exactly.
+	startNumber uint64
 	// clipID, duration and channels are the clip's, zero while the voice
 	// waits on it.
 	clipID   ClipID
@@ -376,18 +387,11 @@ func (s *tableSlot) makeVoiceEntry(paused bool) VoiceEntry {
 // cone say. Its audibility is that times its bus's volume, and the
 // equal-power matrix of its azimuth is scaled by it.
 func (s *tableSlot) computeParams(listenerAt, front, up m.Vec3, busVolume float32, paused bool) {
+	s.audibility, s.distance = s.options.computeAudibility(listenerAt, busVolume)
 	azimuth := 0.0
-	gain := 1.0
-	s.distance = 0
 	if position, positional := s.options.Position.Get(); positional {
-		s.distance = position.Distance(listenerAt)
-		gain = computeDistanceGain(s.options.Falloff.Or(Falloff{}).resolve(), float64(s.distance))
-		if orientation, facing := s.options.Orientation.Get(); facing {
-			gain *= computeConeGain(s.options.Cone.Or(Cone{}).resolve(), position, orientation.Rotate(m.Vec3{Z: -1}), listenerAt)
-		}
 		azimuth, _ = computeAzimuthElevation(position, listenerAt, front, up)
 	}
-	s.audibility = float32(gain) * busVolume
 	gains := computeEqualPowerGains(azimuth, s.channels >= 2)
 	for source := range gains {
 		for output := range gains[source] {

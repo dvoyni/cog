@@ -30,7 +30,9 @@ type Plugin struct {
 // Config is sfx's part of the kernel's config, under PluginName.
 type Config struct {
 	// MaxVoices is how many voices may exist at once; zero means 64. A play
-	// that finds every slot taken ends with ReasonStolen.
+	// that finds every slot taken steals the slot of the voice it outranks,
+	// by VoiceOptions.Priority and then audibility, or ends itself, either
+	// ending with ReasonStolen.
 	MaxVoices int
 	// MaxBuses is how many buses exist, Master among them; zero means 32. A
 	// bus outside them is Master.

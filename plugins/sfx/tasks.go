@@ -39,7 +39,7 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	for _, recorded := range queue.state.operations {
 		switch recorded.kind {
 		case operationPlay:
-			voices.start(recorded, clips.load(k, filesHandle.Get(), backend, recorded.path), &state.endings)
+			voices.start(recorded, clips.load(k, filesHandle.Get(), backend, recorded.path), &state.endings, &state.changes.Stops)
 		case operationStop:
 			voices.stop(recorded.voice, &state.endings)
 		case operationStopBus:
@@ -75,7 +75,7 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	}
 	voices.collect(&state.changes)
 	backend.Emit(&state.changes)
-	queue.state.freeSlots = voices.appendFreeSlots(queue.state.freeSlots[:0])
+	queue.rankSlots(voices, buses, heardFrom)
 	for _, ending := range state.endings {
 		k.Publish(ending)
 	}
