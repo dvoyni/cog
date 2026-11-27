@@ -18,8 +18,10 @@ read-ahead goroutines are properties of code rather than of anything a game
 observes, and no test above the seam can see any of them.
 
 Status: being built. The plugin, its `Config`, and an open device playing
-silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965);
-the rest is designed, not yet built. v1's otosound, which this ports, was
+silence are built, from [otosound: the plugin and an open device playing silence](https://github.com/dvoyni/cog/issues/965),
+and the handoff ring with the releases held behind its applied counter, from
+[otosound: the handoff ring](https://github.com/dvoyni/cog/issues/967), its
+changes drained by a mixer that still plays silence; the rest is designed, not yet built. v1's otosound, which this ports, was
 built and tested on v1's kernel.
 
 ## Problem Statement
