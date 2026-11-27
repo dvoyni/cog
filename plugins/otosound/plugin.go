@@ -49,7 +49,8 @@ type Config struct {
 	BufferSize time.Duration
 	// DecodedClipLimit is the largest decoded size, in bytes, a clip may have
 	// and still be decoded once at load; a larger clip streams, with a decoder
-	// and a read-ahead ring per voice.
+	// and a read-ahead ring per voice. Until streaming is built, a larger
+	// clip fails its prepare instead, reported under its path.
 	//   0  means 512 KiB, the default
 	//  -1  means no limit: always decode
 	//  -2  means always stream: never decode at load
@@ -79,10 +80,13 @@ type Plugin struct {
 	config Config
 	// mixer is what the device's player pulls.
 	mixer mixer
-	// clips is the clip table, the flush side's alone: a start's ClipID is
-	// resolved through it when Emit stages the start, so the device thread
-	// never reads it.
-	clips map[sfx.ClipID]sfx.PreparedClip
+	// clips is the clip table, every clip Install minted an ID for, under
+	// it. It is the flush side's alone: a start's ClipID is resolved through
+	// it when Emit stages the start, so the device thread never reads it.
+	clips map[sfx.ClipID]*preparedClip
+	// lastClipID is the ID Install minted last; the next is one more, so an
+	// ID is never zero and never repeats.
+	lastClipID sfx.ClipID
 	// releases are the destroyed clips held until the mixer has passed the
 	// changes that destroyed them.
 	releases []clipRelease
@@ -92,6 +96,13 @@ type Plugin struct {
 	// deviceGoroutine is the device goroutine, which Destroy waits for
 	// before it closes the player.
 	deviceGoroutine sync.WaitGroup
+	// finishedPreparesMutex guards finishedPrepares, the prepares finished
+	// since the last TakePrepared, which the prepare goroutines append to.
+	// It is the backend's only lock, and nothing the mixer runs can reach it.
+	finishedPreparesMutex sync.Mutex
+	finishedPrepares      []sfx.Prepared
+	// prepareGoroutines are the prepares in flight, which Destroy waits for.
+	prepareGoroutines sync.WaitGroup
 }
 
 // NewPlugin returns otosound, reaching the sound card through oto.
@@ -108,10 +119,10 @@ func (*Plugin) Dependencies() []kernel.PluginName { return nil }
 // Init reads the config, fills in its defaults, makes the clip table, sets
 // the Device not ready and named "otosound", and binds sfx.BackendSocket to
 // the backend. It opens nothing, so it never fails on a device: sfx's Start
-// opens it, through the backend's Voices. A config of another type than *Config is a composition
-// error, and panics, as does a field out of its range: a negative
-// SampleRate, BufferSize, RingDepth, ReadAhead, RefillWait or DeviceRetry,
-// or a DecodedClipLimit below -2, which names no tier.
+// opens it, through the backend's Voices. A config of another type than
+// *Config is a composition error, and panics, as does a field out of its
+// range: a negative SampleRate, BufferSize, RingDepth, ReadAhead, RefillWait
+// or DeviceRetry, or a DecodedClipLimit below -2, which names no tier.
 func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	givenConfig := kernel.PluginConfigOrDefault[Config](config)
 	checkNotNegative("SampleRate", givenConfig.SampleRate)
@@ -132,7 +143,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 		RefillWait:       cmp.Or(givenConfig.RefillWait, defaultRefillWait),
 		DeviceRetry:      cmp.Or(givenConfig.DeviceRetry, defaultDeviceRetry),
 	}
-	p.clips = make(map[sfx.ClipID]sfx.PreparedClip)
+	p.clips = map[sfx.ClipID]*preparedClip{}
 	p.status.Store(&sfx.Device{Name: string(PluginName)})
 	configurator.BindSocket[sfx.BackendSocket](backend{plugin: p})
 	return nil
@@ -146,11 +157,12 @@ func (*Plugin) Start(*kernel.Kernel) error { return nil }
 // its jobs, so the player stays open until Destroy.
 func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 
-// Destroy waits for the device goroutine and then closes this kernel's
-// player, which stops reading the mixer before it returns, so a destroyed
-// kernel leaves nothing of otosound's running. The oto context stays open,
-// for the kernels after.
+// Destroy waits for the prepares in flight and the device goroutine, and
+// then closes this kernel's player, which stops reading the mixer before it
+// returns, so a destroyed kernel leaves nothing of otosound's running. The
+// oto context stays open, for the kernels after.
 func (p *Plugin) Destroy() error {
+	p.prepareGoroutines.Wait()
 	p.deviceGoroutine.Wait()
 	p.device.close()
 	return nil

@@ -39,7 +39,7 @@ const (
 // clip and never looks it up.
 type operation struct {
 	// clip is the clip a start plays, nil on every other operation.
-	clip   sfx.PreparedClip
+	clip   *preparedClip
 	offset time.Duration
 	params sfx.VoiceParams
 	clipID sfx.ClipID

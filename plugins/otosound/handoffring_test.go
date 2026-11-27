@@ -216,8 +216,8 @@ func TestAPlayAllocatesNothingInTheBackend(t *testing.T) {
 		t.Skip("allocation counts are not meaningful under -race")
 	}
 	b, plugin := spawnHandoff(t)
-	plugin.clips[1] = &fakeClip{}
-	changes := &sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: 1}}}
+	clipID, _ := installClip(t, b)
+	changes := &sfx.FlushChanges{Starts: []sfx.VoiceStart{{Slot: 0, Clip: clipID}}}
 	block := make([]byte, 480*bytesPerFrame)
 	b.Emit(changes)
 	plugin.mixer.Read(block)

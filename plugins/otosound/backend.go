@@ -104,19 +104,53 @@ func (b backend) Emit(changes *sfx.FlushChanges) {
 // enough to poll every flush.
 func (b backend) Device() sfx.Device { return *b.plugin.status.Load() }
 
-// Prepare answers not done, and no prepare ever finishes, so a voice on the
-// clip waits for it.
+// Prepare answers not done and prepares the clip on a goroutine of its own,
+// off both the flush and the device thread: a clip whose decoded size is
+// within Config.DecodedClipLimit is decoded there, once, and the encoded
+// bytes, otosound's from the call on, are let go behind it. Its completion,
+// the prepared clip or the error, comes back under token through
+// TakePrepared. A clip over the limit streams, which is not built yet, so its
+// completion is errStreamingNotBuilt; the prepare's other errors are
+// ErrNotOggVorbis, ErrNoStreamFormat and ErrNoStreamLength.
 func (b backend) Prepare(token any, encoded []byte) (sfx.PreparedClip, bool, error) {
+	decodedClipLimit := b.plugin.config.DecodedClipLimit
+	b.plugin.prepareGoroutines.Go(func() {
+		completion := sfx.Prepared{Token: token}
+		// A failed prepare hands sfx a nil clip, never a typed nil, which sfx
+		// would install rather than report.
+		if clip, err := prepareClip(encoded, decodedClipLimit); err != nil {
+			completion.Err = err
+		} else {
+			completion.Clip = clip
+		}
+		b.plugin.finishedPreparesMutex.Lock()
+		defer b.plugin.finishedPreparesMutex.Unlock()
+		b.plugin.finishedPrepares = append(b.plugin.finishedPrepares, completion)
+	})
 	return nil, false, nil
 }
 
-// TakePrepared answers nothing, since no prepare finishes.
-func (b backend) TakePrepared() []sfx.Prepared { return nil }
+// TakePrepared answers the prepares that finished since the last call, and
+// clears them.
+func (b backend) TakePrepared() []sfx.Prepared {
+	b.plugin.finishedPreparesMutex.Lock()
+	defer b.plugin.finishedPreparesMutex.Unlock()
+	taken := b.plugin.finishedPrepares
+	b.plugin.finishedPrepares = nil
+	return taken
+}
 
-// Install refuses every clip: otosound installs only what its own Prepare
-// made, and sfx installs nothing else.
-func (b backend) Install(clip sfx.PreparedClip) (sfx.ClipID, error) {
-	return 0, errNotOurClip
+// Install mints the clip's ID, non-zero and never repeating, and keeps the
+// clip in the clip table under it. A clip otosound's own Prepare did not make
+// is refused with errNotOurClip.
+func (b backend) Install(prepared sfx.PreparedClip) (sfx.ClipID, error) {
+	clip, ours := prepared.(*preparedClip)
+	if !ours || clip == nil {
+		return 0, errNotOurClip
+	}
+	b.plugin.lastClipID++
+	b.plugin.clips[b.plugin.lastClipID] = clip
+	return b.plugin.lastClipID, nil
 }
 
 // startPlayer starts this kernel's player over the mixer and, once it plays,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/sfx"
+	"github.com/dvoyni/cog/plugins/sfx/loopregion"
 	"github.com/jfreymuth/oggvorbis"
 )
 
@@ -77,7 +78,7 @@ func (b *Backend) Prepare(token any, encoded []byte) (sfx.PreparedClip, bool, er
 	if frames <= 0 {
 		return nil, false, ErrNoStreamLength{}
 	}
-	loopRegion, loopRegionErr := readLoopRegion(reader.CommentHeader().Comments, sampleRate, frames)
+	loopRegion, loopRegionErr := loopregion.Read(reader.CommentHeader().Comments, sampleRate, frames)
 	return preparedClip{
 		duration:      float32(frames) / float32(sampleRate),
 		channels:      channels,
