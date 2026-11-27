@@ -47,7 +47,9 @@ func playWith(h *sfxtest.Harness, options sfx.VoiceOptions) sfx.Voice {
 // readListener answers the listener as of the last flush.
 func readListener(h *sfxtest.Harness) sfx.Listener {
 	var heardFrom sfx.Listener
-	h.Read(func(_ sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, listener sfx.Listener) { heardFrom = listener })
+	h.Read(func(_ sfx.LiveVoices, _ sfx.ClipTable, _ sfx.BusVolumes, listener sfx.Listener, _ sfx.DeviceView) {
+		heardFrom = listener
+	})
 	return heardFrom
 }
 

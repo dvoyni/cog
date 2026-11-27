@@ -33,7 +33,7 @@ func playOn(h *sfxtest.Harness, bus sfx.Bus) sfx.Voice {
 // into.
 func readBusVolume(h *sfxtest.Harness, bus sfx.Bus) float32 {
 	var volume float32
-	h.Read(func(_ sfx.LiveVoices, _ sfx.ClipTable, buses sfx.BusVolumes, _ sfx.Listener) {
+	h.Read(func(_ sfx.LiveVoices, _ sfx.ClipTable, buses sfx.BusVolumes, _ sfx.Listener, _ sfx.DeviceView) {
 		volume = buses.Volume(bus)
 	})
 	return volume

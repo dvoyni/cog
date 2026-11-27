@@ -111,6 +111,18 @@ func (v liveVoices) stopBus(bus Bus, endings *[]VoiceEndedEvent) {
 	}
 }
 
+// restate owes every voice the backend holds a restart at its playhead, as
+// the device turning ready does: the backend has no playheads, so only sfx
+// can resume a voice where the world is now rather than where the device
+// left it. It costs at most MaxVoices starts, once per arrival.
+func (v liveVoices) restate() {
+	for index := range v.table.slots {
+		if slot := &v.table.slots[index]; slot.state == slotSounding {
+			slot.owesRestart = true
+		}
+	}
+}
+
 // resolve binds each voice waiting on a clip that clips now holds ready, and
 // ends with ReasonFailed each whose clip has failed, unless its play was
 // applied in this flush: a failure ends a voice one or more flushes after its
@@ -181,9 +193,11 @@ func (v liveVoices) computeParams(heardFrom listener, buses busVolumes) {
 // restated, whatever moved them: a SetBus, a listener's move or a pause costs
 // at most MaxVoices updates, and a voice whose params came out the same, at
 // a bus volume it already had, a listener it did not move relative to or a
-// pause it was already under, costs none. A voice played and ended inside one
-// flush appears in none: it was never audible, so there is nothing to start
-// and nothing to stop.
+// pause it was already under, costs none. A voice restate marked is
+// restarted at its playhead instead, with this flush's params, which it then
+// holds, so no update follows it. A voice played and ended inside one flush
+// appears in none: it was never audible, so there is nothing to start and
+// nothing to stop.
 func (v liveVoices) collect(changes *FlushChanges) {
 	for index := range v.table.slots {
 		slot := &v.table.slots[index]
@@ -201,7 +215,17 @@ func (v liveVoices) collect(changes *FlushChanges) {
 			slot.heldParams = slot.params
 			slot.state = slotSounding
 		case slotSounding:
-			if slot.params != slot.heldParams {
+			switch {
+			case slot.owesRestart:
+				changes.Starts = append(changes.Starts, VoiceStart{
+					Slot:   VoiceSlot(index),
+					Clip:   slot.clipID,
+					Offset: slot.playhead,
+					Params: slot.params,
+				})
+				slot.heldParams = slot.params
+				slot.owesRestart = false
+			case slot.params != slot.heldParams:
 				changes.Updates = append(changes.Updates, VoiceUpdate{Slot: VoiceSlot(index), Params: slot.params})
 				slot.heldParams = slot.params
 			}
@@ -285,6 +309,9 @@ type tableSlot struct {
 	playhead time.Duration
 	// options is how the voice was played.
 	options VoiceOptions
+	// owesRestart is whether the backend holds the voice and restate marked
+	// it, so it is owed a VoiceStart at its playhead in place of an update.
+	owesRestart bool
 	// clipID, duration and channels are the clip's, zero while the voice
 	// waits on it.
 	clipID   ClipID

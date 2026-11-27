@@ -16,12 +16,15 @@ import (
 // time read and prepared there, and then the bus volumes, the listener and
 // the pause they coalesced to; binds the voices waiting on a clip that is now
 // ready and ends those whose clip failed; advances every playhead by delta;
-// computes every live voice's params, the W3C equations against the listener,
-// its bus's volume and the pause; hands the backend the flush's changes,
-// restating a voice only when its params differ from those the backend
-// holds; frees the slots whose voices ended, only now that their stops are
-// handed over, for the next flush's plays; and publishes each ending.
-func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], busesHandle kernel.Write[BusVolumes], listenerHandle kernel.Write[Listener], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
+// computes every live voice's params, the W3C equations against the
+// listener, its bus's volume and the pause; polls the backend's device into
+// DeviceView; hands the backend the flush's changes, restating a voice only
+// when its params differ from those the backend holds, and every voice it
+// holds restarted at its playhead, with those params, when the device has
+// just turned ready; frees the slots whose voices ended, only now that their
+// stops are handed over, for the next flush's plays; and publishes each
+// ending.
+func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue], voicesHandle kernel.Write[LiveVoices], clipsHandle kernel.Write[ClipTable], busesHandle kernel.Write[BusVolumes], listenerHandle kernel.Write[Listener], deviceHandle kernel.Write[DeviceView], stateHandle kernel.Write[*flushState], filesHandle kernel.Read[platform.FS]) kernel.NoResult {
 	queue := queueHandle.Get()
 	voices := voicesHandle.Get()
 	clips := clipsHandle.Get()
@@ -55,6 +58,12 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	voices.resolve(clips, &state.endings)
 	voices.advance(delta, &state.endings)
 	voices.computeParams(heardFrom, buses)
+	wasReady := deviceHandle.Get().device.Ready
+	device := backend.Device()
+	deviceHandle.Set(deviceView{device: device})
+	if device.Ready && !wasReady {
+		voices.restate()
+	}
 	voices.collect(&state.changes)
 	backend.Emit(&state.changes)
 	queue.state.freeSlots = voices.appendFreeSlots(queue.state.freeSlots[:0])

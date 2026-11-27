@@ -112,9 +112,10 @@ func TestAPauseIsAnUpdatePerLiveVoiceAndLeavesWhatTheGameSaid(t *testing.T) {
 // The pause beats a device that is not ready. A pause while the device is not
 // ready suspends everything, the playhead rule included, which is the one
 // place the rule that a playhead advances whether or not anyone can hear it
-// does not hold.
+// does not hold. Once the pause ends, the same device still not ready, the
+// playhead advances again, so it was the pause that held it.
 func TestAPauseBeatsADeviceThatIsNotReady(t *testing.T) {
-	h := newHarness(t, nil, seamPlugin{seam: &seam{device: m.Some(sfx.Device{Name: "notready"})}})
+	h := newFakeHarness(t, &fakeBackend{notReady: true})
 
 	voice := play(h)
 	setPaused(h, true)
@@ -122,8 +123,16 @@ func TestAPauseBeatsADeviceThatIsNotReady(t *testing.T) {
 		h.Step()
 	}
 
+	if device := readDevice(h); device != notReadyFakeDevice {
+		t.Fatalf("the device reads %+v, want the fake backend's, which is not ready", device)
+	}
 	if got, _ := readLiveVoice(h, voice); got.Playhead != sfxtest.StepInterval {
 		t.Fatalf("a playhead moved to %v under a pause with no device, want %v", got.Playhead, sfxtest.StepInterval)
+	}
+
+	setPaused(h, false)
+	if got, _ := readLiveVoice(h, voice); got.Playhead != 2*sfxtest.StepInterval {
+		t.Fatalf("with the pause ended and still no device the playhead is %v, want %v", got.Playhead, 2*sfxtest.StepInterval)
 	}
 }
 

@@ -3,7 +3,9 @@ package sfx
 import "time"
 
 // Device reports the sound device as it is now. It is read-only: a game cannot
-// choose a backend, only see which one it got.
+// choose a backend, only see which one it got. A backend builds it and
+// answers it from BackendSocket.Device; a game reads it from DeviceView, as
+// of the last flush.
 type Device struct {
 	// Ready reports whether anything is audible. False means absent, not opened
 	// yet, or lost; a game cannot tell which, and does not need to.

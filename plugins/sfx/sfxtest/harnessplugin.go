@@ -50,8 +50,8 @@ func (p harnessPlugin) Init(configurator *kernel.Configurator, _ any) error {
 		}
 		return kernel.NoResult{}
 	})
-	read := configurator.RegisterTask4(func(k *kernel.Kernel, _ kernel.NoArg, voices kernel.Read[sfx.LiveVoices], clips kernel.Read[sfx.ClipTable], buses kernel.Read[sfx.BusVolumes], listener kernel.Read[sfx.Listener]) kernel.NoResult {
-		p.harness.reading(voices.Get(), clips.Get(), buses.Get(), listener.Get())
+	read := configurator.RegisterTask5(func(k *kernel.Kernel, _ kernel.NoArg, voices kernel.Read[sfx.LiveVoices], clips kernel.Read[sfx.ClipTable], buses kernel.Read[sfx.BusVolumes], listener kernel.Read[sfx.Listener], device kernel.Read[sfx.DeviceView]) kernel.NoResult {
+		p.harness.reading(voices.Get(), clips.Get(), buses.Get(), listener.Get(), device.Get())
 		return kernel.NoResult{}
 	})
 	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, beat metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
