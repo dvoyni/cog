@@ -10,6 +10,7 @@ use (
 	./plugins/gogpu
 	./plugins/metronome
 	./plugins/mux
+	./plugins/otosound
 	./plugins/platform
 	./plugins/render
 	./plugins/sfx
@@ -30,6 +31,7 @@ replace (
 	github.com/dvoyni/cog/plugins/metronome v0.0.0 => ./plugins/metronome
 	github.com/dvoyni/cog/plugins/platform v0.0.0 => ./plugins/platform
 	github.com/dvoyni/cog/plugins/render v0.0.0 => ./plugins/render
+	github.com/dvoyni/cog/plugins/sfx v0.0.0 => ./plugins/sfx
 	github.com/gogpu/gogpu v0.0.0 => ./submodules/gogpu
 )
 

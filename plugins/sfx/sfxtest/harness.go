@@ -30,8 +30,9 @@ const workerCount = 2
 // tests and those of a game's sound. Spawn spawns, through a
 // kernel.Supervisor, platform with a memory mount, metronome with a
 // fixed-step track on a metronome.ManualClock, sfx, the harness's own
-// plugin, which binds the headless backend, and the test's plugins after it;
-// Step steps one beat.
+// plugin, which binds the headless backend unless UsePluginBackend leaves the
+// socket to a plugin of the test's, and the test's plugins after it; Step
+// steps one beat.
 type Harness struct {
 	t          testing.TB
 	supervisor *kernel.Supervisor
@@ -40,6 +41,9 @@ type Harness struct {
 	// memory is the memory mount Mount puts clip bytes in, bound at the root
 	// of platform's FS.
 	memory *filesystems.MemoryFS
+	// pluginBackend is set by UsePluginBackend, for the harness's plugin to
+	// bind no backend.
+	pluginBackend bool
 	// reading is what Read hands the views to, set while it waits for its
 	// job.
 	reading func(voices sfx.LiveVoices, clips sfx.ClipTable)
@@ -83,6 +87,17 @@ func (h *Harness) Spawn(config *sfx.Config, plugins ...kernel.Plugin) {
 		h.t.Fatal(err)
 	}
 	h.kernel = h.supervisor.GetKernel(id)
+}
+
+// UsePluginBackend has Spawn bind no backend, so a plugin among the test's
+// binds sfx's BackendSocket, as otosound's kernel tests bind otosound's over
+// its fake device. It is called before Spawn, and fails the test after.
+func (h *Harness) UsePluginBackend() {
+	h.t.Helper()
+	if h.kernel != nil {
+		h.t.Fatal("sfxtest: leaving the backend to a plugin after Spawn")
+	}
+	h.pluginBackend = true
 }
 
 // Mount puts data in the memory mount as the file path, which a play then
