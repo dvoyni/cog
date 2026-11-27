@@ -11,9 +11,11 @@ import (
 // flush is the body of Tasks.Flush. It holds every resource of sfx's at once,
 // which is what applying a flush atomically means in lock terms: no recorder
 // is mid-append while the queue is drained, and no reader sees half a flush's
-// voices. In order, it applies the operations recorded, a clip named for the
-// first time read and prepared there, and then the bus volumes they
-// coalesced to and the pause recorded last; advances every playhead by delta;
+// voices. In order, it installs the prepares the backend finished since the
+// last flush; applies the operations recorded, a clip named for the first
+// time read and prepared there, and then the bus volumes they coalesced to
+// and the pause recorded last; binds the voices waiting on a clip that is now
+// ready and ends those whose clip failed; advances every playhead by delta;
 // folds each voice's bus volume into its gains; hands the backend the flush's
 // changes; frees the slots whose voices ended, only now that their stops are
 // handed over, for the next flush's plays; and publishes each ending.
@@ -26,6 +28,7 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	backend := state.backend.Get()
 	state.changes.reset()
 	state.endings = state.endings[:0]
+	clips.drain(k, backend)
 	for _, recorded := range queue.state.operations {
 		switch recorded.kind {
 		case operationPlay:
@@ -43,6 +46,7 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 		voices.setPaused(paused)
 		queue.state.paused = m.Maybe[bool]{}
 	}
+	voices.resolve(clips, &state.endings)
 	voices.advance(delta, &state.endings)
 	voices.collect(&state.changes, buses)
 	backend.Emit(&state.changes)

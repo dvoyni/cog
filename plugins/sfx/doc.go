@@ -10,8 +10,10 @@
 // every playhead and publishes a VoiceEndedEvent for each voice that ended.
 // It groups voices on buses it declares, under Master, moving each bus's
 // volume with SetBus and reading it back from BusVolumes. It reads the live
-// voices from LiveVoices. Package sfxtest runs sfx in a
-// real kernel over the headless backend, for tests.
+// voices from LiveVoices. No operation returns an error: a clip that cannot
+// be read or prepared is logged once under its path, as an ErrClipUnreadable
+// or an ErrClipFailed, and its voices end with ReasonFailed. Package sfxtest
+// runs sfx in a real kernel over the headless backend, for tests.
 //
 // BackendSocket is the seam. A backend is told how many slots exist once,
 // receives one FlushChanges per flush, multiplies a gain matrix it did not

@@ -33,6 +33,10 @@ const (
 	// ReasonStolen is the cap: a play that found every slot taken ends with
 	// it in the flush that applies it, never having been live.
 	ReasonStolen
+	// ReasonFailed is a clip that could not be read or prepared. It arrives
+	// one or more flushes after the play, never in the flush that applied it,
+	// since preparing is asynchronous.
+	ReasonFailed
 )
 
 // String renders a reason for a log and a failure message.
@@ -44,6 +48,8 @@ func (r Reason) String() string {
 		return "stopped"
 	case ReasonStolen:
 		return "stolen"
+	case ReasonFailed:
+		return "failed"
 	}
 	return "unknown"
 }
