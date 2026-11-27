@@ -75,7 +75,7 @@ func (p *Plugin) Init(configurator *kernel.Configurator, config any) error {
 	configurator.InitResource(makeBusVolumes(maxBuses))
 	configurator.InitResource(makeListener())
 	configurator.InitResource(deviceView{})
-	configurator.InitResource(&flushState{backend: p.backend})
+	configurator.InitResource(newFlushState(p.backend, p.maxVoices))
 	configurator.InitResource(Tasks{Flush: configurator.RegisterTask8(flush)})
 	return nil
 }
