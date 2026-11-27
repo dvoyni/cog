@@ -131,6 +131,40 @@ func TestAVoiceToTheListenersRightIsHeardRight(t *testing.T) {
 	}
 }
 
+// Positional is one-way. The first position a voice receives, at Play or by
+// SetVoice, makes it positional for the rest of its life: no operation is
+// silently ignored, no clearing verb is needed, and a voice that should stop
+// being positional is a new Play. A Falloff given to a voice with no
+// position is kept, and takes effect when it gets one.
+func TestTheFirstPositionMakesAVoicePositionalForTheRestOfItsLife(t *testing.T) {
+	seam := &seam{}
+	h := newHarness(t, nil, monoPlugin{}, seamPlugin{seam: seam})
+
+	voice := playWith(h, sfx.VoiceOptions{Volume: m.Some[float32](1), Falloff: m.Some(sfx.MakeDefaultFalloff())})
+	if entry, _ := readLiveVoice(h, voice); !isClose(entry.Audibility, 1) {
+		t.Fatalf("a voice carrying a falloff and no position is audible at %v, want 1", entry.Audibility)
+	}
+
+	h.Record(func(queue sfx.Queue) { queue.SetVoice(voice, sfx.VoiceOptions{Position: m.Some(m.Vec3{X: 4})}) })
+	h.Step()
+
+	entry, _ := readLiveVoice(h, voice)
+	if !isClose(entry.Distance, 4) || !isClose(entry.Audibility, 0.25) {
+		t.Fatalf("the voice is %v from the listener and audible at %v, want 4 and W3C's 0.25, -12 dB", entry.Distance, entry.Audibility)
+	}
+	// Hard right: a mono clip goes entirely to the right ear.
+	if gains := seam.emitted()[1].Updates[0].Params.Gains; !isSameMatrix(gains, [2][2]float32{{0, 0.25}}) {
+		t.Fatalf("a voice on the listener's right crosses the seam as %v, want all of it in the right ear", gains)
+	}
+
+	// A change that states no position leaves the one it has.
+	h.Record(func(queue sfx.Queue) { queue.SetVoice(voice, sfx.VoiceOptions{Volume: m.Some[float32](0.5)}) })
+	h.Step()
+	if entry, _ := readLiveVoice(h, voice); !isClose(entry.Distance, 4) || !isClose(entry.Audibility, 0.125) {
+		t.Fatalf("after a change of volume alone the voice is %v away and audible at %v, want it still positional at 4 and 0.125", entry.Distance, entry.Audibility)
+	}
+}
+
 // A 2D game rotates its listener once, and only then does a sprite's Y
 // matter: under an unrotated listener a sprite 20 px right and one 20 px
 // right and 400 px up the screen are both hard right; under the rotation the
@@ -169,8 +203,10 @@ func TestTheTwoDimensionalRotationMakesASpritesYMatter(t *testing.T) {
 
 // Audibility is the scalar before panning, never anything read off the
 // matrix: over an orbit at one distance it does not move, while every entry
-// of the matrix travels from one ear to the other. The listener orbits the
-// voice, which is the same orbit seen from the voice.
+// of the matrix travels from one ear to the other. Reading it off the matrix
+// would make it swing by a factor of the square root of two twice a lap, and
+// "quietest" and "furthest away" would be two policies that disagree on a
+// circle.
 func TestAudibilityDoesNotMoveOverAConstantRadiusOrbit(t *testing.T) {
 	seam := &seam{}
 	h := newHarness(t, nil, monoPlugin{}, seamPlugin{seam: seam})
@@ -184,13 +220,13 @@ func TestAudibilityDoesNotMoveOverAConstantRadiusOrbit(t *testing.T) {
 	}
 
 	// Six degrees a flush, so the orbit ends before the fixture does, and
-	// passes hard left and hard right on the way.
+	// passes hard right and hard left on the way.
 	var leftmost, rightmost float32
 	for step := 1; step < 60; step++ {
 		degrees := step * 6
 		radians := float64(degrees) * math.Pi / 180
-		position := m.Vec3{X: float32(-math.Sin(radians) * radius), Z: float32(math.Cos(radians)*radius) - radius}
-		h.Record(func(queue sfx.Queue) { queue.SetListener(sfx.ListenerOptions{Position: m.Some(position)}) })
+		position := m.Vec3{X: float32(math.Sin(radians) * radius), Z: float32(-math.Cos(radians) * radius)}
+		h.Record(func(queue sfx.Queue) { queue.SetVoice(voice, sfx.VoiceOptions{Position: m.Some(position)}) })
 		h.Step()
 
 		if entry, _ := readLiveVoice(h, voice); !isClose(entry.Audibility, firstEntry.Audibility) {

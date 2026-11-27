@@ -150,20 +150,21 @@ func TestPriorityIsABandAndNotAWeight(t *testing.T) {
 
 // A paused voice ranks at the audibility it would have unpaused. Ranking it at
 // zero would make "pause the music for a cutscene" a reliable way to lose the
-// music; ranking it first would make pausing a shield. The pause of every
-// voice is the same, so the incoming play here arrives under one.
+// music; ranking it first would make pausing a shield. A voice the game
+// pauses itself, after it started, and the pause of every voice are the
+// same, so the incoming play here arrives under both.
 func TestAPausedVoiceRanksAtTheAudibilityItWouldHave(t *testing.T) {
 	h := newHarness(t, &sfx.Config{MaxVoices: 2})
 
-	paused := footstep(sfx.Master)
-	paused.Paused = m.Some(true)
 	var loud, quiet sfx.Voice
 	h.Record(func(queue sfx.Queue) {
 		queue.SetBus(busEffects, 0.2)
 		queue.SetBus(busMusic, 0.5)
-		loud = queue.Play(clipPath, 0, paused)
+		loud = queue.Play(clipPath, 0, footstep(sfx.Master))
 		quiet = queue.Play(clipPath, 0, footstep(busEffects))
 	})
+	h.Step()
+	h.Record(func(queue sfx.Queue) { queue.SetVoice(loud, sfx.VoiceOptions{Paused: m.Some(true)}) })
 	h.Step()
 	if entry, _ := readLiveVoice(h, loud); !entry.Paused || entry.Audibility != 1 {
 		t.Fatalf("the voice the test paused reads paused %v at %v, want paused at unity", entry.Paused, entry.Audibility)
@@ -201,6 +202,49 @@ func TestAVoiceWaitingOnItsClipOccupiesASlot(t *testing.T) {
 	if _, live := readLiveVoice(h, waiting); !live || readLiveCount(h) != 1 {
 		t.Fatal("the voice waiting on its clip lost the slot its clock was already running in")
 	}
+}
+
+// Priority is an option like every other and rides the one ordered list of
+// operations: a SetVoice raising it is what a game does when a sound becomes
+// important after it started, and the band it moves into is the band it is
+// ranked in from the next flush on.
+func TestPriorityIsRestatedByTheSameOrderedListEveryOtherOptionIs(t *testing.T) {
+	h := newHarness(t, &sfx.Config{MaxVoices: 2})
+
+	var promoted, ordinary sfx.Voice
+	h.Record(func(queue sfx.Queue) {
+		promoted = queue.Play(clipPath, 0, footstep(sfx.Master))
+		ordinary = queue.Play(clipPath, 0, footstep(sfx.Master))
+	})
+	h.Step()
+
+	h.Record(func(queue sfx.Queue) { queue.SetVoice(promoted, sfx.VoiceOptions{Priority: m.Some(1)}) })
+	h.Step()
+	if entry, _ := readLiveVoice(h, promoted); entry.Options.Priority != m.Some(1) {
+		t.Fatalf("the view reads the priority %v after the SetVoice, want 1", entry.Options.Priority)
+	}
+
+	h.Record(func(queue sfx.Queue) { queue.Play(clipPath, 0, footstep(sfx.Master)) })
+	h.Step()
+
+	wantStolen(t, h.Endings(), ordinary)
+	if _, live := readLiveVoice(h, promoted); !live {
+		t.Fatal("a voice promoted a band by SetVoice was stolen by the band below it")
+	}
+}
+
+// A voice's own volume is part of the audibility stealing ranks on, the
+// incoming play's included: a play quieter by its volume than every voice
+// live is the one that loses, and one that is louder steals.
+func TestAPlayIsRankedWithItsOwnVolume(t *testing.T) {
+	h := newHarness(t, &sfx.Config{MaxVoices: 1})
+
+	held := playWith(h, sfx.VoiceOptions{Volume: m.Some[float32](0.5)})
+	quieter := playWith(h, sfx.VoiceOptions{Volume: m.Some[float32](0.2)})
+	wantStolen(t, h.Endings(), quieter)
+
+	playWith(h, sfx.VoiceOptions{Volume: m.Some[float32](0.8)})
+	wantStolen(t, h.Endings(), quieter, held)
 }
 
 // A stolen voice reaches the backend as an ordinary stop, applied before the

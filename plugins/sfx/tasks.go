@@ -42,6 +42,10 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 			voices.start(recorded, clips.load(k, filesHandle.Get(), backend, recorded.path), &state.endings, &state.changes.Stops)
 		case operationStop:
 			voices.stop(recorded.voice, &state.endings)
+		case operationSetVoice:
+			voices.set(recorded)
+		case operationSeek:
+			voices.seek(recorded.voice, recorded.offset, &state.endings)
 		case operationStopBus:
 			voices.stopBus(recorded.bus, &state.endings)
 		case operationPreload:

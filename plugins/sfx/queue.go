@@ -73,6 +73,38 @@ func (q queue) Stop(voice Voice) {
 	q.state.operations = append(q.state.operations, operation{kind: operationStop, voice: voice})
 }
 
+// SetVoice records what voice becomes: each field options states replaces
+// the voice's own, and an absent one leaves it as it is. It is applied in the
+// order recorded, so the last SetVoice before a flush wins, and a Play
+// followed by a SetVoice in one flush is indistinguishable from a Play that
+// carried the same options. It is a no-op on a voice that no longer exists,
+// and on NoVoice. A Bus outside Config.MaxBuses is Master, as at Play.
+//
+// Changing Loop on a voice the backend already holds restarts it where it
+// stands, since looping is a fact of the voice's start at the seam: a
+// block-accurate discontinuity, as a Seek is.
+func (q queue) SetVoice(voice Voice, options VoiceOptions) {
+	if voice == NoVoice {
+		return
+	}
+	bus := options.Bus.Or(Master).resolve(len(q.state.busVolumeSets))
+	q.state.operations = append(q.state.operations, operation{kind: operationSetVoice, voice: voice, options: options, bus: bus})
+}
+
+// Seek records a move of voice's playhead to offset into its clip. A
+// negative offset is zero. An offset at or past the clip's end ends a
+// one-shot with ReasonFinished and moves a looping voice to its loop start,
+// not to zero, so a seek off the end of a track with an intro lands in the
+// loop. On a voice still waiting on its clip it moves where the voice will
+// start from. It is block-accurate, never sample-accurate, and a no-op on a
+// voice that no longer exists, and on NoVoice.
+func (q queue) Seek(voice Voice, offset time.Duration) {
+	if voice == NoVoice {
+		return
+	}
+	q.state.operations = append(q.state.operations, operation{kind: operationSeek, voice: voice, offset: offset})
+}
+
 // SetPaused records a pause of every voice at once, as when a menu is shown
 // over the game, or its end, with false. A pause suspends every live voice,
 // each resuming on the same sample it stopped on; a voice played during it
@@ -251,6 +283,10 @@ const (
 	operationPlay operationKind = iota
 	// operationStop ends one.
 	operationStop
+	// operationSetVoice changes one's options.
+	operationSetVoice
+	// operationSeek moves one's playhead.
+	operationSeek
 	// operationStopBus ends every voice on a bus.
 	operationStopBus
 	// operationPreload reads and prepares a clip nothing plays yet.
@@ -267,12 +303,14 @@ const (
 type operation struct {
 	kind  operationKind
 	voice Voice
-	// path is the clip a play, a preload or a release names, and offset and
-	// options are where in it a play's voice begins and how it starts.
+	// path is the clip a play, a preload or a release names; offset is where
+	// in it a play's voice begins or a seek moves it to; and options are how
+	// a play's voice starts or what a SetVoice makes it.
 	path    string
 	offset  time.Duration
 	options VoiceOptions
-	// bus is the resolved bus a play's voice plays on, or a StopBus stops.
+	// bus is the resolved bus a play's voice plays on, a SetVoice moves it
+	// to when its options state one, or a StopBus stops.
 	bus Bus
 }
 

@@ -18,6 +18,9 @@ type VoiceEntry struct {
 	Playhead time.Duration
 	// Duration is the clip's length, zero while the voice waits on its clip.
 	Duration time.Duration
+	// Options is what the voice is set to now: the options it was played
+	// with, every SetVoice since merged in, as the game said them.
+	Options VoiceOptions
 	// Paused is whether the voice's playhead is stopped, by its own
 	// VoiceOptions.Paused or by Queue.SetPaused's pause of every voice, so a
 	// reader asking whether the playhead moves is answered about the playhead
@@ -25,11 +28,11 @@ type VoiceEntry struct {
 	Paused bool
 	// Audibility is the voice's final gain before panning, the scalar a test
 	// asserts a voice is heard at: its falloff times its cone, 1 on a
-	// non-positional voice, times its bus's volume. It is never read off the
-	// gain matrix, so a voice orbiting the listener at one distance is as
-	// audible at every point of the orbit. The pan is sfx's arithmetic, and
-	// the view does not carry it: a game checking that its sound is on the
-	// player's right checks where it put the source.
+	// non-positional voice, times its own volume and its bus's. It is never
+	// read off the gain matrix, so a voice orbiting the listener at one
+	// distance is as audible at every point of the orbit. The pan is sfx's
+	// arithmetic, and the view does not carry it: a game checking that its
+	// sound is on the player's right checks where it put the source.
 	Audibility float32
 	// Distance is how far the voice is from the listener, in the game's
 	// units, zero on a non-positional voice.

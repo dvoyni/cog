@@ -5,26 +5,31 @@
 //
 // A game records operations on the Queue from its own tasks, under
 // kernel.Write[sfx.Queue]: a Play names a clip by its path in platform's FS
-// and hands back the voice's handle at once. It schedules Tasks.Flush on each
-// update beat, after its recorders, which applies what was recorded, advances
-// every playhead and publishes a VoiceEndedEvent for each voice that ended.
-// It groups voices on buses it declares, under Master, moving each bus's
-// volume with SetBus and reading it back from BusVolumes. It reads the live
-// voices from LiveVoices, and the device from DeviceView: a device that is
-// absent, not ready yet or lost reads not ready, a fact rather than an error,
-// and every playhead advances whether or not anyone can hear it. It preloads
-// a clip with Preload, so a loading screen pays its read, asks what it is
-// with ClipTable.Info, which never starts a load, and gets its memory back
-// with Release or ReleaseAll, which end the voices on it with ReasonReleased.
-// At most Config.MaxVoices voices exist at once: a play arriving at a full
-// table steals from the voice in the lowest VoiceOptions.Priority band the
-// least audible, ties going to the oldest, or is itself the one that loses,
-// either ending with ReasonStolen, so music put a band up survives any crowd
-// of footsteps.
-// No operation returns an error: a clip that cannot be read or prepared is
-// logged once under its path, as an ErrClipUnreadable or an ErrClipFailed,
-// and its voices end with ReasonFailed. Package sfxtest runs sfx in a real
-// kernel over the headless backend, for tests.
+// and hands back the voice's handle at once. It changes a voice with SetVoice,
+// whose VoiceOptions replace the fields they state, its volume, pitch, loop,
+// pause and the rest, and moves its playhead with Seek; a voice told to Loop
+// repeats over its clip's loop region, an intro running into a loop with no
+// gap, or over the whole clip when it declares none. It schedules Tasks.Flush
+// on each update beat, after its recorders, which applies what was recorded,
+// advances every playhead and publishes a VoiceEndedEvent for each voice that
+// ended. It groups voices on buses it declares, under Master, moving each
+// bus's volume with SetBus and reading it back from BusVolumes. It reads the
+// live voices from LiveVoices, and the device from DeviceView: a device that
+// is absent, not ready yet or lost reads not ready, a fact rather than an
+// error, and every playhead advances whether or not anyone can hear it. It
+// preloads a clip with Preload, so a loading screen pays its read, asks what
+// it is with ClipTable.Info, which never starts a load, and gets its memory
+// back with Release or ReleaseAll, which end the voices on it with
+// ReasonReleased. At most Config.MaxVoices voices exist at once: a play
+// arriving at a full table steals from the voice in the lowest
+// VoiceOptions.Priority band the least audible, ties going to the oldest, or
+// is itself the one that loses, either ending with ReasonStolen, so music put
+// a band up survives any crowd of footsteps. No operation returns an error: a
+// clip that cannot be read or prepared is logged once under its path, as an
+// ErrClipUnreadable or an ErrClipFailed, and its voices end with ReasonFailed,
+// and a loop region its backend dropped is logged once under its path as an
+// ErrLoopRegionIgnored, the clip looping whole. Package sfxtest runs sfx in a
+// real kernel over the headless backend, for tests.
 //
 // A voice given a Position in VoiceOptions is positional for the rest of its
 // life, heard from the one listener the game places with Queue.SetListener
