@@ -3,13 +3,26 @@ package sfxtest_test
 import (
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/dvoyni/cog/kernel"
+	"github.com/dvoyni/cog/plugins/metronome"
 	"github.com/dvoyni/cog/plugins/sfx"
 	"github.com/dvoyni/cog/plugins/sfx/sfxtest"
 )
+
+// clipPath is where the tests mount the fixture clip, the headless backend's
+// own: 48704 frames of stereo at 44.1 kHz.
+const clipPath = "pianoroll.ogg"
+
+// endsOnStep is the step the fixture's one-shot ends on: 1.104399 s at a
+// sixty-fourth of a second a step is 70.68 steps, so the voice is still
+// playing after 70 and gone after 71.
+const endsOnStep = 71
 
 // failureRecorder is the test a harness runs under, keeping each failure it
 // is told of instead of failing, so a test can assert that the harness
@@ -21,6 +34,13 @@ type failureRecorder struct {
 
 func (r *failureRecorder) Errorf(format string, args ...any) {
 	r.failures = append(r.failures, fmt.Sprintf(format, args...))
+}
+
+// Fatal keeps the failure and ends the goroutine, as testing's Fatal does, so
+// the call that failed is made on a goroutine of its own.
+func (r *failureRecorder) Fatal(args ...any) {
+	r.failures = append(r.failures, fmt.Sprint(args...))
+	runtime.Goexit()
 }
 
 // playMissingClip records a play of a path that is not there, and steps
@@ -128,6 +148,89 @@ func TestWarningsAnswersEachWarningLoggedAndFailsNothing(t *testing.T) {
 	if len(warnings) != 1 || warnings[0].Message != "no sound card" || !slices.Equal(warnings[0].Args, []any{"tries", 3}) {
 		t.Fatalf("the warnings are %v, want the one the plugin logged", warnings)
 	}
+}
+
+// UsePluginFlush called after Spawn fails the test, as UseBackend and
+// UsePluginBackend do.
+func TestUsePluginFlushAfterSpawnFailsTheTest(t *testing.T) {
+	recorder := &failureRecorder{TB: t}
+	h := sfxtest.NewHarness(recorder)
+	h.Spawn(nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.UsePluginFlush()
+	}()
+	<-done
+
+	if len(recorder.failures) != 1 {
+		t.Fatalf("UsePluginFlush after Spawn failed the test %d times, want once: %q", len(recorder.failures), recorder.failures)
+	}
+}
+
+// flushingGame is a game's own plugin: each beat it schedules sfx's flush, as
+// every game schedules it.
+type flushingGame struct {
+	lifecycleStub
+}
+
+func (flushingGame) Name() kernel.PluginName { return "game" }
+
+func (flushingGame) Dependencies() []kernel.PluginName {
+	return []kernel.PluginName{sfx.PluginName}
+}
+
+func (flushingGame) Init(configurator *kernel.Configurator, _ any) error {
+	tasks, _ := configurator.Resource[sfx.Tasks]()
+	flush := tasks.Flush
+	configurator.Subscribe(func(k *kernel.Kernel, ex *kernel.Executor, in kernel.JobHandle, beat metronome.UpdateEvent) (metronome.UpdateEvent, kernel.JobHandle) {
+		return beat, ex.Join(in, ex.Schedule(flush, beat.Delta+beat.Lost).Handle())
+	})
+	return nil
+}
+
+// Under UsePluginFlush, a game's own plugin flushes alone, and a play
+// recorded through Record lands in the next step's flush, the game's: its
+// voice advances once a beat and ends on the step its duration says.
+func TestUnderUsePluginFlushAGamesFlushAdvancesAVoiceOnceABeat(t *testing.T) {
+	h := sfxtest.NewHarness(t)
+	h.UsePluginFlush()
+	h.Spawn(nil, flushingGame{})
+	h.Mount(clipPath, readFixtureClip(t))
+
+	var voice sfx.Voice
+	h.Record(func(queue sfx.Queue) { voice = queue.Play(clipPath, 0, sfx.VoiceOptions{}) })
+	for step := 1; step < endsOnStep; step++ {
+		h.Step()
+		var entry sfx.VoiceEntry
+		var live bool
+		h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener, device sfx.DeviceView) {
+			entry, live = voices.Info(voice)
+		})
+		if want := time.Duration(step) * sfxtest.StepInterval; !live || entry.Playhead != want {
+			t.Fatalf("the voice is %+v, live %v, after step %d, want it %v in", entry, live, step, want)
+		}
+	}
+	if endings := h.Endings(); len(endings) != 0 {
+		t.Fatalf("the endings are %v before step %d, want none", endings, endsOnStep)
+	}
+	h.Step()
+
+	if endings := h.Endings(); len(endings) != 1 || endings[0] != (sfx.VoiceEndedEvent{Voice: voice, Reason: sfx.ReasonFinished}) {
+		t.Fatalf("the endings are %v after step %d, want the voice finished", endings, endsOnStep)
+	}
+}
+
+// readFixtureClip answers the fixture clip's bytes, the headless backend's
+// own.
+func readFixtureClip(t *testing.T) []byte {
+	t.Helper()
+	clip, err := os.ReadFile("../headless/testdata/pianoroll.ogg")
+	if err != nil {
+		t.Fatalf("reading the fixture clip: %v", err)
+	}
+	return clip
 }
 
 // isUnreadable answers whether err is a clip's ErrClipUnreadable.

@@ -29,7 +29,10 @@
 // purpose. UseBackend, before Spawn, binds a backend of the test's own in
 // place of the headless one, for what the headless backend never does: a
 // prepare answering done=false, or a device that is not ready. Configure,
-// before Spawn, gives a plugin among the test's its config.
+// before Spawn, gives a plugin among the test's its config. UsePluginFlush,
+// before Spawn, has the harness schedule no flush, so a game's own plugin,
+// which schedules Tasks.Flush itself, is spawned among the test's whole and
+// flushes once a beat, the records queued running before its beat.
 //
 // A test asserts against sfx's flush-computed state and its events, never
 // against samples and never below the seam: above it, on a fixed step,

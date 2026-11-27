@@ -33,7 +33,8 @@ const workerCount = 2
 // fixed-step track on a metronome.ManualClock, sfx, the harness's own
 // plugin, which binds the backend UseBackend gave, or else the headless
 // backend, unless UsePluginBackend leaves the socket to a plugin of the
-// test's, and the test's plugins after it; Step steps one beat.
+// test's, and schedules sfx's flush, unless UsePluginFlush leaves it to a
+// plugin of the test's, and the test's plugins after it; Step steps one beat.
 //
 // It is strict: the test fails on every error the kernel logged, checked
 // after each Step and when the test ends, unless a match given ExpectError
@@ -55,6 +56,9 @@ type Harness struct {
 	// pluginBackend is set by UsePluginBackend, for the harness's plugin to
 	// bind no backend.
 	pluginBackend bool
+	// pluginFlush is set by UsePluginFlush, for the harness's plugin to
+	// schedule no flush and Step to run the records before the beat.
+	pluginFlush bool
 	// configs are the configs Configure gave, by plugin, which Spawn puts in
 	// the kernel's config beside sfx's and metronome's.
 	configs map[kernel.PluginName]any
@@ -115,9 +119,9 @@ func (h *Harness) UseBackend(backend sfx.BackendSocket) {
 // spawn fails.
 //
 // The harness's plugin schedules sfx's flush on each beat itself, so a plugin
-// among plugins that schedules the flush too, as a game's own does, flushes a
-// second time each beat, advancing every playhead twice. Such a plugin stays
-// out, and what its recorders record is driven through Record.
+// among plugins that schedules the flush too, as a game's own does, would
+// flush a second time each beat, advancing every playhead twice: a test
+// spawning such a plugin calls UsePluginFlush first, leaving the flush to it.
 func (h *Harness) Spawn(config *sfx.Config, plugins ...kernel.Plugin) {
 	h.t.Helper()
 	configs := maps.Clone(h.configs)
@@ -143,6 +147,19 @@ func (h *Harness) UsePluginBackend() {
 		h.t.Fatal("sfxtest: leaving the backend to a plugin after Spawn")
 	}
 	h.pluginBackend = true
+}
+
+// UsePluginFlush has the harness schedule no flush, so a plugin among the
+// test's schedules sfx's Tasks.Flush on each beat, as a game's own plugin
+// does, and the test spawns that plugin whole. Each Step then runs the
+// records queued in a job of their own before the beat, so they still land in
+// its flush. It is called before Spawn, and fails the test after.
+func (h *Harness) UsePluginFlush() {
+	h.t.Helper()
+	if h.kernel != nil {
+		h.t.Fatal("sfxtest: leaving the flush to a plugin after Spawn")
+	}
+	h.pluginFlush = true
 }
 
 // Configure puts config under name in the kernel's config, for a plugin
@@ -171,7 +188,9 @@ func (h *Harness) Mount(path string, data []byte) {
 
 // Record has the harness's recording task call record with sfx's queue in
 // the next step, before its flush and after every record queued before it,
-// so a test records without writing a plugin.
+// so a test records without writing a plugin. Under UsePluginFlush the task
+// runs before the step's beat, and so before the flush a plugin schedules in
+// it.
 func (h *Harness) Record(record func(queue sfx.Queue)) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
@@ -180,9 +199,15 @@ func (h *Harness) Record(record func(queue sfx.Queue)) {
 
 // Step steps one beat, StepInterval long: the harness's recording task runs
 // the records queued, then sfx's flush applies them, and Step returns once
-// the beat has finished, every ending of it published.
+// the beat has finished, every ending of it published. Under UsePluginFlush
+// the recording task runs, and finishes, before the beat, whose flush is the
+// plugin's.
 func (h *Harness) Step() {
 	h.t.Helper()
+	if h.pluginFlush {
+		_, recorded := h.kernel.Publish(recordEvent{})
+		h.await(recorded, "the records")
+	}
 	h.clock.Advance(StepInterval)
 	h.checkLogged()
 }
@@ -227,12 +252,19 @@ func (h *Harness) Read(read func(voices sfx.LiveVoices, clips sfx.ClipTable, bus
 	h.reading = read
 	defer func() { h.reading = nil }()
 	_, out := h.kernel.Publish(readEvent{})
+	h.await(out, "the read")
+}
+
+// await returns once job has finished, and fails the test when it has not in
+// Timeout, naming what it waited on.
+func (h *Harness) await(job kernel.JobHandle, what string) {
+	h.t.Helper()
 	signal := kernel.NewSignal()
-	h.kernel.Notify(signal, out)
+	h.kernel.Notify(signal, job)
 	select {
 	case <-signal.C():
 	case <-time.After(Timeout):
-		h.t.Fatalf("sfxtest: the read did not finish in %v", Timeout)
+		h.t.Fatalf("sfxtest: %s did not finish in %v", what, Timeout)
 	}
 }
 

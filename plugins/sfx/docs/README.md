@@ -160,28 +160,23 @@ func (*game) Start(*kernel.Kernel) error { return nil }
 func (*game) Stop(*kernel.Kernel) error  { return nil }
 func (*game) Destroy() error             { return nil }
 
-// recordSounds is the game's recorder, run on each beat before sfx's flush.
+// recordSounds is the game's recorder, run on each beat before sfx's flush:
+// the music at the first beat, and a footstep every beatsPerFootstep.
 func recordSounds(k *kernel.Kernel, _ kernel.NoArg, queue kernel.Write[sfx.Queue], state kernel.Write[soundState]) kernel.NoResult {
 	sounds := state.Get()
-	recordBeat(queue.Get(), &sounds)
-	state.Set(sounds)
-	return kernel.NoResult{}
-}
-
-// recordBeat is one beat of the game's sound: the music at the first, and a
-// footstep every beatsPerFootstep.
-func recordBeat(queue sfx.Queue, sounds *soundState) {
 	if sounds.musicVoice == sfx.NoVoice {
-		sounds.musicVoice = queue.Play("music.ogg", 0, sfx.VoiceOptions{
+		sounds.musicVoice = queue.Get().Play("music.ogg", 0, sfx.VoiceOptions{
 			Bus:      m.Some(busMusic),
 			Loop:     m.Some(true),
 			Priority: m.Some(1),
 		})
 	}
 	if sounds.beatCount%beatsPerFootstep == 0 {
-		queue.Play("step.ogg", 0, sfx.VoiceOptions{Bus: m.Some(busEffects)})
+		queue.Get().Play("step.ogg", 0, sfx.VoiceOptions{Bus: m.Some(busEffects)})
 	}
 	sounds.beatCount++
+	state.Set(sounds)
+	return kernel.NoResult{}
 }
 
 func init() { runtime.LockOSThread() }
@@ -855,13 +850,15 @@ against W3C's numbers.
 with a memory mount, metronome with a fixed-step update track on a manual
 clock, sfx, and a plugin of the harness's own that binds the headless
 backend and, on each beat, schedules the test's records and then sfx's
-flush, as a game schedules it.
+flush, as a game schedules it, or under `UsePluginFlush` leaves the flush to
+a game's own plugin among the test's.
 
 | Call | What it does |
 |---|---|
 | `NewHarness(t)` | A harness whose kernel is not yet spawned; the test's end quits it and checks the errors logged. |
 | `UseBackend(backend)` | Before `Spawn`: binds `backend` in place of the headless one, for a device that is not ready or a prepare that finishes later. |
 | `UsePluginBackend()` | Before `Spawn`: binds no backend, so a plugin among the test's binds the socket, as otosound's kernel tests bind otosound's. |
+| `UsePluginFlush()` | Before `Spawn`: schedules no flush, so a plugin among the test's that schedules `Tasks.Flush`, as a game's own does, flushes once a beat; the test's records run before each beat. |
 | `Configure(name, config)` | Before `Spawn`: gives another plugin among the test's its config, such as otosound's `Config`; sfx's and metronome's come from `Spawn`. |
 | `Spawn(config, plugins…)` | Spawns the kernel with `config`, nil for the defaults, the test's plugins listed after sfx. |
 | `Mount(path, data)` | Puts a clip's bytes in the memory mount, at the root of the files, as the file `path`. |
@@ -878,15 +875,26 @@ The harness is strict: an error the test did not expect fails it. It waits
 same, so everything above the seam is deterministic: which voices exist,
 their playheads, the order stealing takes and the step each ending fires at.
 
-### A game's recorder
+### A game's own plugin
 
 The harness schedules sfx's flush itself, so a game's plugin that schedules
-the flush, as the quick start's `game` does, stays out of the harness, or
-each beat would flush twice. Its recorder is tested through `Record`, calling
-what the recorder's task calls, `recordBeat`, with the queue the harness
-hands it. These tests sit beside the quick start, in its package `main`:
+the flush too, as the quick start's `game` does, would flush twice a beat.
+`UsePluginFlush`, before `Spawn`, leaves the flush to it: the game is spawned
+among the test's plugins whole, its recorder and its flush on each beat, and
+what the test records through `Record` runs before each beat, so it lands in
+the game's flush. The game is given no files of its own, and the test mounts
+the clips it plays in the harness's memory mount. Its voice handles are kept
+in its own resource, so a test finds a voice in the view. These tests sit
+beside the quick start, in its package `main`:
 
 ```go
+// spawnGame spawns the quick start's game under UsePluginFlush, with no
+// files of its own.
+func spawnGame(h *sfxtest.Harness) {
+	h.UsePluginFlush()
+	h.Spawn(nil, &game{files: fstest.MapFS{}})
+}
+
 // mountAssets mounts the quick start's clips from its embedded assets.
 func mountAssets(t *testing.T, h *sfxtest.Harness, paths ...string) {
 	t.Helper()
@@ -899,42 +907,47 @@ func mountAssets(t *testing.T, h *sfxtest.Harness, paths ...string) {
 	}
 }
 
-// stepGame steps count beats of the game's recorder.
-func stepGame(h *sfxtest.Harness, sounds *soundState, count int) {
-	record := func(queue sfx.Queue) { recordBeat(queue, sounds) }
-	for range count {
-		h.Record(record)
-		h.Step()
-	}
+// readMusic answers the music's entry in the live view, a zero entry while it
+// is not playing.
+func readMusic(h *sfxtest.Harness) sfx.VoiceEntry {
+	var music sfx.VoiceEntry
+	h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener, device sfx.DeviceView) {
+		for entry := range voices.All() {
+			if entry.Path == "music.ogg" {
+				music = entry
+			}
+		}
+	})
+	return music
 }
 
 func TestTheMusicLoopsOnItsBusABandUp(t *testing.T) {
 	h := sfxtest.NewHarness(t)
-	h.Spawn(nil)
+	spawnGame(h)
 	mountAssets(t, h, "music.ogg", "step.ogg")
-	var sounds soundState
-	stepGame(h, &sounds, 3)
+	for range 3 {
+		h.Step()
+	}
 
-	h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener, device sfx.DeviceView) {
-		music, live := voices.Info(sounds.musicVoice)
-		if !live {
-			t.Fatal("the music is not playing")
-		}
-		if music.Bus != busMusic || !music.Options.Loop.Or(false) || music.Options.Priority.Or(0) != 1 {
-			t.Errorf("the music is %+v, want it looping on busMusic at priority 1", music)
-		}
-		if music.Playhead != 3*sfxtest.StepInterval {
-			t.Errorf("the music is %v in, want three steps, the flush that played it among them", music.Playhead)
-		}
-	})
+	music := readMusic(h)
+	if music.Voice == sfx.NoVoice {
+		t.Fatal("the music is not playing")
+	}
+	if music.Bus != busMusic || !music.Options.Loop.Or(false) || music.Options.Priority.Or(0) != 1 {
+		t.Errorf("the music is %+v, want it looping on busMusic at priority 1", music)
+	}
+	if music.Playhead != 3*sfxtest.StepInterval {
+		t.Errorf("the music is %v in, want three steps, the flush that played it among them", music.Playhead)
+	}
 }
 
 func TestAFootstepFallsEveryHalfSecond(t *testing.T) {
 	h := sfxtest.NewHarness(t)
-	h.Spawn(nil)
+	spawnGame(h)
 	mountAssets(t, h, "music.ogg", "step.ogg")
-	var sounds soundState
-	stepGame(h, &sounds, beatsPerFootstep+1)
+	for range beatsPerFootstep + 1 {
+		h.Step()
+	}
 
 	h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener, device sfx.DeviceView) {
 		footstepCount := 0
@@ -952,10 +965,11 @@ func TestAFootstepFallsEveryHalfSecond(t *testing.T) {
 func TestAMissingFootstepFailsItsVoicesAndIsReportedOnce(t *testing.T) {
 	h := sfxtest.NewHarness(t)
 	h.ExpectError(isUnreadable)
-	h.Spawn(nil)
+	spawnGame(h)
 	mountAssets(t, h, "music.ogg")
-	var sounds soundState
-	stepGame(h, &sounds, beatsPerFootstep+2)
+	for range beatsPerFootstep + 2 {
+		h.Step()
+	}
 
 	failedCount := 0
 	for _, ending := range h.Endings() {
@@ -1063,19 +1077,20 @@ func (absentDevice) Device() sfx.Device { return sfx.Device{Name: "absent"} }
 func TestTheMusicPlaysOnWithNoDevice(t *testing.T) {
 	h := sfxtest.NewHarness(t)
 	h.UseBackend(absentDevice{headless.NewBackend(0)})
-	h.Spawn(nil)
+	spawnGame(h)
 	mountAssets(t, h, "music.ogg", "step.ogg")
-	var sounds soundState
-	stepGame(h, &sounds, 64)
+	for range 64 {
+		h.Step()
+	}
 
 	h.Read(func(voices sfx.LiveVoices, clips sfx.ClipTable, buses sfx.BusVolumes, listener sfx.Listener, device sfx.DeviceView) {
 		if device.Device().Ready {
 			t.Error("the device is ready, want none")
 		}
-		if music, _ := voices.Info(sounds.musicVoice); music.Playhead != time.Second {
-			t.Errorf("the music is %v in, want a second whether or not anyone hears it", music.Playhead)
-		}
 	})
+	if music := readMusic(h); music.Playhead != time.Second {
+		t.Errorf("the music is %v in, want a second whether or not anyone hears it", music.Playhead)
+	}
 }
 ```
 
