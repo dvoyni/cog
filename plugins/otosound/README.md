@@ -16,9 +16,12 @@ converted there to the device's rate with a windowed sinc while still
 answering its own, and installed; and the mixer, mixing every resident voice
 through its gain matrix at its rate, each change and each stop declicked
 over a block, a paused voice holding its playhead, and a looping voice
-wrapping gaplessly at its loop region. A clip over the limit fails its
-prepare until streaming is built. Streaming, and the device's probe, retry
-and reports are designed, not yet built. The design is in
+wrapping gaplessly at its loop region; and streaming, a clip over the
+limit keeping its bytes, each voice on it decoding and converting ahead into
+a read-ahead ring of its own on a goroutine, playing from its offset once
+its ring primes, looping gaplessly, and halted with its voice and in
+`Destroy`. The device's probe, retry and reports are designed, not yet
+built. The design is in
 [`docs/design.md`](docs/design.md), and the build on the
 [sfx map](https://github.com/dvoyni/cog/issues/945).
 
@@ -45,5 +48,6 @@ and reports are designed, not yet built. The design is in
   voice table and then opens the device and starts this kernel's player; its `Emit` publishes each flush's
   changes to the mixer, never waiting on it; its `Device` answers the device
   as it is now, with one atomic load; its `Prepare` decodes a clip on a
-  goroutine of its own and converts it to the device's rate there, its
-  completion drained by `TakePrepared` and its ID minted by `Install`.
+  goroutine of its own and converts it to the device's rate there, or keeps
+  a long one's bytes to stream, its completion drained by `TakePrepared` and
+  its ID minted by `Install`.

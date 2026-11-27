@@ -39,7 +39,10 @@ const (
 // clip and never looks it up.
 type operation struct {
 	// clip is the clip a start plays, nil on every other operation.
-	clip   *preparedClip
+	clip *preparedClip
+	// ring is the read-ahead ring a start on a streamed clip reads, which the
+	// flush side made when it staged the start; nil on every other operation.
+	ring   *readAheadRing
 	offset time.Duration
 	params sfx.VoiceParams
 	clipID sfx.ClipID

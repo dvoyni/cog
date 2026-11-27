@@ -4,6 +4,7 @@ package otosound
 
 import (
 	"slices"
+	"time"
 
 	"github.com/dvoyni/cog/plugins/sfx"
 )
@@ -16,8 +17,9 @@ type backend struct {
 	plugin *Plugin
 }
 
-// Voices sizes the handoff ring and the mixer's voice table for n slots, an n
-// of zero or less taken as one, and only then opens the device and starts
+// Voices sizes the handoff ring, the mixer's voice table and the table of
+// each slot's read-ahead for n slots, an n of zero or less taken as one, and
+// only then opens the device and starts
 // this kernel's player over the mixer: the mixer must exist complete before
 // anything can pull a block out of it. It takes the
 // process's oto context, or creates it, synchronously, since that does not
@@ -29,20 +31,23 @@ type backend struct {
 // ready.
 func (b backend) Voices(n int) {
 	voiceCount := max(n, 1)
-	b.plugin.mixer = makeMixer(newHandoffRing(b.plugin.config.RingDepth, voiceCount), voiceCount)
+	b.plugin.mixer = makeMixer(newHandoffRing(b.plugin.config.RingDepth, voiceCount), voiceCount, b.plugin.outputSampleRate)
+	b.plugin.readAheads = make([]*readAhead, voiceCount)
 	settings, err := b.plugin.device.open(b.plugin.config.SampleRate, b.plugin.config.BufferSize)
 	if err != nil {
 		return
 	}
 	b.plugin.outputSampleRate = settings.sampleRate
+	b.plugin.mixer.outputSampleRate = settings.sampleRate
 	b.plugin.deviceGoroutine.Go(func() { b.startPlayer(settings) })
 }
 
 // Emit copies one flush's changes, which are sfx's and valid only for the
 // call, into the staging changes, in the order the seam states: the stops
-// first, then the starts, each ClipID resolved to the clip it names while the
-// clip table is still the flush side's own, then the updates, then the
-// destroys, each moving its clip out of the table to be held until the mixer
+// first, each halting the slot's read-ahead, then the starts, each ClipID
+// resolved to the clip it names while the clip table is still the flush
+// side's own, and a start on a streamed clip given its read-ahead ring, then
+// the updates, then the destroys, each moving its clip out of the table to be held until the mixer
 // has passed it. Stops come before starts because a steal puts both in one
 // flush's changes, and recorded the other way round the stop would fade out
 // the voice that had just replaced it.
@@ -62,14 +67,17 @@ func (b backend) Emit(changes *sfx.FlushChanges) {
 	merging := len(staging.operations) > 0
 	for _, slot := range changes.Stops {
 		staging.record(operation{kind: operationKindStop, slot: slot}, merging)
+		b.haltReadAhead(slot)
 	}
 	for index := range changes.Starts {
 		start := &changes.Starts[index]
+		clip := b.plugin.clips[start.Clip]
 		staging.record(operation{
 			kind:   operationKindStart,
 			slot:   start.Slot,
 			clipID: start.Clip,
-			clip:   b.plugin.clips[start.Clip],
+			clip:   clip,
+			ring:   b.openReadAhead(start.Slot, clip, start.Offset, start.Loop),
 			offset: start.Offset,
 			loop:   start.Loop,
 			params: start.Params,
@@ -114,9 +122,10 @@ func (b backend) Device() sfx.Device { return *b.plugin.status.Load() }
 // call on, are let go behind it. The clip still answers its source's facts,
 // its rate among them, never the device's. Its completion,
 // the prepared clip or the error, comes back under token through
-// TakePrepared. A clip over the limit streams, which is not built yet, so its
-// completion is errStreamingNotBuilt; the prepare's other errors are
-// ErrNotOggVorbis, ErrNoStreamFormat and ErrNoStreamLength.
+// TakePrepared. A clip over the limit streams: its completion keeps the
+// bytes, and its voices decode them on read-aheads of their own. The
+// prepare's errors are ErrNotOggVorbis, ErrNoStreamFormat and
+// ErrNoStreamLength, a length that reads zero among them.
 func (b backend) Prepare(token any, encoded []byte) (sfx.PreparedClip, bool, error) {
 	decodedClipLimit := b.plugin.config.DecodedClipLimit
 	outputSampleRate := b.plugin.outputSampleRate
@@ -173,4 +182,38 @@ func (b backend) startPlayer(settings deviceSettings) {
 		Channels:   outputChannels,
 		Latency:    settings.bufferSize,
 	})
+}
+
+// openReadAhead opens the read-ahead of a start on clip in slot, when clip
+// streams, and answers the ring its voice reads, nil for a resident clip. It
+// first halts the read-ahead the start replaces: a steal is a stop and a
+// start, and a recovery restates every live voice as a start, and each would
+// leave a read-ahead filling a ring nothing reads again. On the flush it
+// allocates the ring and starts a goroutine, the streamed tier's cost per
+// voice; the decoder's open and seek are the goroutine's, so neither the
+// flush nor the device thread pays for them.
+func (b backend) openReadAhead(slot sfx.VoiceSlot, clip *preparedClip, offset time.Duration, loop bool) *readAheadRing {
+	if slot < 0 || int(slot) >= len(b.plugin.readAheads) {
+		return nil
+	}
+	b.haltReadAhead(slot)
+	if clip == nil || !clip.streams() {
+		return nil
+	}
+	ringFrames := int(b.plugin.config.ReadAhead.Seconds() * float64(b.plugin.outputSampleRate))
+	openedReadAhead := newReadAhead(clip, offset, loop, ringFrames)
+	refillWait := b.plugin.config.RefillWait
+	b.plugin.readAheadGoroutines.Go(func() { openedReadAhead.fill(refillWait) })
+	b.plugin.readAheads[slot] = openedReadAhead
+	return openedReadAhead.ring
+}
+
+// haltReadAhead halts slot's read-ahead, if it has one, and forgets it,
+// without waiting for its goroutine.
+func (b backend) haltReadAhead(slot sfx.VoiceSlot) {
+	if slot < 0 || int(slot) >= len(b.plugin.readAheads) || b.plugin.readAheads[slot] == nil {
+		return
+	}
+	b.plugin.readAheads[slot].halt()
+	b.plugin.readAheads[slot] = nil
 }

@@ -191,8 +191,9 @@ func TestPrepareRefusesAStreamWithNoFormat(t *testing.T) {
 }
 
 // A stream whose length reads zero fails the prepare with ErrNoStreamLength,
-// as it does under the headless backend, until streaming is built to count
-// its frames.
+// as it does under the headless backend, rather than streaming: its last
+// page carries a granule position of zero, and the decoder panics on the
+// last packet of one rather than counting it.
 func TestPrepareRefusesAStreamWithNoLength(t *testing.T) {
 	b := makeTestBackend(t, Config{})
 	b.Prepare(nil, clearLastGranule(t, readFixture(t)))
@@ -295,7 +296,7 @@ func TestDestroyWaitsForThePreparesInFlight(t *testing.T) {
 // import no package that could, only those its own work needs.
 func TestTheDeviceThreadsFilesImportNothingThatCouldDecode(t *testing.T) {
 	allowed := []string{"encoding/binary", "math", "sync/atomic", "time", "github.com/dvoyni/cog/plugins/sfx"}
-	for _, file := range []string{"mixer.go", "voice.go", "handoffring.go", "changelist.go"} {
+	for _, file := range []string{"mixer.go", "voice.go", "handoffring.go", "changelist.go", "readaheadring.go"} {
 		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
 		if err != nil {
 			t.Fatalf("parsing %s: %v", file, err)

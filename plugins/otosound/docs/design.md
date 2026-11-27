@@ -29,11 +29,18 @@ a clip within `DecodedClipLimit` is decoded on a prepare goroutine and
 installed in the clip table; and the decoded tier's half of *Resampling*, from
 [otosound: resampling in Prepare](https://github.com/dvoyni/cog/issues/970):
 the prepare goroutine converts a decoded clip to the rate in force with the
-windowed sinc, the clip still answering its source's rate. Until streaming
-is built, a clip over the limit, or any clip under the always-stream
-sentinel, fails its prepare with a private error saying it would stream, and
-a clip whose length reads zero fails with `ErrNoStreamLength`, as under the
-headless backend, rather than being counted. The rest is designed, not yet built. v1's otosound,
+windowed sinc, the clip still answering its source's rate; and *Streaming*,
+with the streamed tier of *Preparing a clip* and its half of *Resampling*,
+from [otosound: streamed clips and read-ahead rings](https://github.com/dvoyni/cog/issues/971):
+a clip over the limit, or any clip under the always-stream sentinel, keeps
+its bytes and the filter its voices share, and each voice on it decodes and
+converts into a read-ahead ring of its own on a goroutine, halted with its
+voice and by `Destroy`. A clip whose length reads zero still fails with
+`ErrNoStreamLength`, as under the headless backend, rather than streaming
+and being counted: such a stream's last page carries a granule position of
+zero, and the oggvorbis fork's `Reader.Read` panics on the last packet of
+one, its discard of the padding past the granule going negative. The rest is
+designed, not yet built. v1's otosound,
 which this ports, was built and tested on v1's kernel.
 
 ## Problem Statement
@@ -462,7 +469,7 @@ Each output frame is clamped to [-1, 1] and written as two little-endian float32
 
 **How it treats each operation:**
 
-- **A start begins at its target gain,** not ramping up from silence: a one-shot that faded in over a block would lose the transient that is the reason it was played. Its playhead starts at the start's offset in converted frames, an offset past the clip's end starting at its last frame; a streamed voice's starts at zero, since its read-ahead was opened at the offset. Its loop bounds are resolved once, here, so no block touches a conversion from seconds.
+- **A start begins at its target gain,** not ramping up from silence: a one-shot that faded in over a block would lose the transient that is the reason it was played. Its playhead starts at the start's offset in converted frames, the offset's seconds times the rate the mixer produces, an offset past the clip's end starting at its last frame; a streamed voice's starts at zero, since its read-ahead was opened at the offset, its seconds times the source's rate. Its loop bounds are resolved once, here, so no block touches a conversion from seconds: the region's seconds times the rate the mixer produces, rounded and capped at the frames held, and for a streamed voice its seconds times the source's rate, rounded, in its read-ahead. Neither scales the clip's frame count.
 - **An update** restates the slot's target, rate and pause, which the next block ramps to. An update that reaches a slot a stop has already claimed is ignored, so a voice sfx has ended is never brought back mid-ramp.
 - **A stop** ramps the voice to silence over the block, then frees the slot. A stop that reaches a voice no block has played yet takes it to silence outright, so a play and a stop in one flush are audible for zero samples.
 - **A negative rate is taken as zero,** which is a legitimate freeze; sfx sends none, and a negative rate would run a voice backwards off the front of its buffer.

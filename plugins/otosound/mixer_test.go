@@ -54,10 +54,10 @@ func makeMonoGains(volume float32) [2][2]float32 {
 	return [2][2]float32{{volume, volume}}
 }
 
-// makeTestMixer answers a mixer of voiceCount slots over a ring of the
-// default depth, made as Voices makes them.
+// makeTestMixer answers a mixer of voiceCount slots producing testRate, over
+// a ring of the default depth, made as Voices makes them.
 func makeTestMixer(voiceCount int) *mixer {
-	testMixer := makeMixer(newHandoffRing(defaultRingDepth, voiceCount), voiceCount)
+	testMixer := makeMixer(newHandoffRing(defaultRingDepth, voiceCount), voiceCount, testRate)
 	return &testMixer
 }
 

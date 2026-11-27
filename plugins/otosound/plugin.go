@@ -49,8 +49,7 @@ type Config struct {
 	BufferSize time.Duration
 	// DecodedClipLimit is the largest decoded size, in bytes, a clip may have
 	// and still be decoded once at load; a larger clip streams, with a decoder
-	// and a read-ahead ring per voice. Until streaming is built, a larger
-	// clip fails its prepare instead, reported under its path.
+	// and a read-ahead ring per voice.
 	//   0  means 512 KiB, the default
 	//  -1  means no limit: always decode
 	//  -2  means always stream: never decode at load
@@ -92,6 +91,14 @@ type Plugin struct {
 	// lastClipID is the ID Install minted last; the next is one more, so an
 	// ID is never zero and never repeats.
 	lastClipID sfx.ClipID
+	// readAheads is each voice slot's read-ahead, nil for a slot playing no
+	// streamed voice: Emit opens one on a start on a streamed clip, and
+	// halts it on the slot's stop or on the start that replaces it. It is
+	// the flush side's alone, and Destroy's, made at Voices.
+	readAheads []*readAhead
+	// readAheadGoroutines are the read-aheads still filling, halted or not,
+	// which Destroy waits for.
+	readAheadGoroutines sync.WaitGroup
 	// releases are the destroyed clips held until the mixer has passed the
 	// changes that destroyed them.
 	releases []clipRelease
@@ -163,12 +170,20 @@ func (*Plugin) Start(*kernel.Kernel) error { return nil }
 // its jobs, so the player stays open until Destroy.
 func (*Plugin) Stop(*kernel.Kernel) error { return nil }
 
-// Destroy waits for the prepares in flight and the device goroutine, and
-// then closes this kernel's player, which stops reading the mixer before it
+// Destroy waits for the prepares in flight, halts every read-ahead and waits
+// for them, since a read-ahead ends with its voice and a kernel being
+// destroyed ends every voice whether or not sfx emitted the stops, waits for
+// the device goroutine, and then closes this kernel's player, which stops reading the mixer before it
 // returns, so a destroyed kernel leaves nothing of otosound's running. The
 // oto context stays open, for the kernels after.
 func (p *Plugin) Destroy() error {
 	p.prepareGoroutines.Wait()
+	for _, slotReadAhead := range p.readAheads {
+		if slotReadAhead != nil {
+			slotReadAhead.halt()
+		}
+	}
+	p.readAheadGoroutines.Wait()
 	p.deviceGoroutine.Wait()
 	p.device.close()
 	return nil

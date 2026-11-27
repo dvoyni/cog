@@ -5,6 +5,7 @@ package otosound
 import (
 	"bytes"
 	"io"
+	"math"
 
 	"github.com/dvoyni/cog/libs/m"
 	"github.com/dvoyni/cog/plugins/sfx"
@@ -16,16 +17,21 @@ import (
 // float32, which a clip's decoded size is counted in.
 const decodedSampleSize = 4
 
-// preparedClip is otosound's prepared clip, decoded once and converted to
-// the rate the mixer produces: its samples, which every voice on it shares,
-// and the facts sfx is told, its source's, never the device's. It is Go
-// memory alone, so a clip released while its prepare is in flight leaves
-// nothing unfreed. The encoded bytes it was decoded from are not kept, since
-// nothing reads them again.
+// preparedClip is otosound's prepared clip, in either tier, and the facts
+// sfx is told, its source's, never the device's, which both tiers answer
+// alike, so sfx cannot tell which it got. A resident clip is decoded once and
+// converted to the rate the mixer produces, its samples shared by every voice
+// on it, and the encoded bytes it was decoded from are not kept, since
+// nothing reads them again. A streamed clip keeps its encoded bytes, the
+// filter its voices share and the way to open decoders over them, and each
+// voice on it decodes into a read-ahead ring of its own. It is Go memory
+// alone, so a clip released while its prepare is in flight leaves nothing
+// unfreed.
 type preparedClip struct {
-	// samples are the clip's frames, interleaved, channels to a frame, at the
-	// rate the mixer produces, converted from the source's once, in Prepare:
-	// len(samples)/channels converted frames, which frames is not.
+	// samples are a resident clip's frames, interleaved, channels to a frame,
+	// at the rate the mixer produces, converted from the source's once, in
+	// Prepare: len(samples)/channels converted frames, which frames is not.
+	// A streamed clip has none: its frames arrive in each voice's ring.
 	samples []float32
 	// frames is the clip's true length in its source's frames: the granule
 	// end where the decoder handed back more.
@@ -40,6 +46,19 @@ type preparedClip struct {
 	// loopRegionErr is why the region the tags declared was dropped, nil
 	// when it is fine or absent.
 	loopRegionErr error
+	// encoded is a streamed clip's bytes, which its voices' decoders read
+	// for as long as the clip is held; nil on a resident clip.
+	encoded []byte
+	// filter converts a streamed clip's frames to the rate the mixer
+	// produces, built once for its pair of rates and read-only after, so
+	// every voice on it shares it; nil when the source is at that rate, and
+	// on a resident clip, which used one once and dropped it.
+	filter *sincFilter
+	// openDecoder opens a decoder over encoded for a voice on a streamed
+	// clip, and is nil on a resident clip, which is what streams asks. It is
+	// a field so that a test can stream frames it generated, through a
+	// decoder that panics if the device thread ever calls it.
+	openDecoder func(encoded []byte) (streamDecoder, error)
 }
 
 // prepareClip reads encoded's identification header and its end granule
@@ -48,11 +67,12 @@ type preparedClip struct {
 // Config.DecodedClipLimit with its default filled in: -1 is no limit, -2
 // decodes none, and a positive limit is the largest size still decoded. A
 // decoded clip whose source's rate is not outputRate, the rate the mixer
-// produces, is converted to it, once, here. A clip over the limit streams,
-// which is not built yet, and fails with errStreamingNotBuilt. Headers that
-// will not parse answer ErrNotOggVorbis, a rate or a channel count the mixer
-// cannot play ErrNoStreamFormat, and a length that reads zero
-// ErrNoStreamLength. It runs on a prepare goroutine, never on the flush or
+// produces, is converted to it, once, here. A clip over the limit streams.
+// Headers that will not parse answer ErrNotOggVorbis, a rate or a channel
+// count the mixer cannot play ErrNoStreamFormat, and a length that reads
+// zero ErrNoStreamLength, as under the headless backend: such a stream's
+// last page carries a granule position of zero, and the decoder panics on
+// the last packet of one rather than counting it. It runs on a prepare goroutine, never on the flush or
 // the device thread.
 func prepareClip(encoded []byte, decodedClipLimit, outputRate int) (*preparedClip, error) {
 	length, format, err := oggvorbis.GetLength(bytes.NewReader(encoded))
@@ -67,7 +87,7 @@ func prepareClip(encoded []byte, decodedClipLimit, outputRate int) (*preparedCli
 	}
 	decodedSize := length * int64(format.Channels) * decodedSampleSize
 	if decodedClipLimit == decodedClipLimitAlwaysStream || decodedClipLimit != decodedClipLimitNone && decodedSize > int64(decodedClipLimit) {
-		return nil, errStreamingNotBuilt
+		return retainClip(encoded, length, outputRate)
 	}
 	clip, err := decodeClip(encoded, length)
 	if err != nil {
@@ -119,6 +139,33 @@ func decodeClip(encoded []byte, granuleEnd int64) (*preparedClip, error) {
 	}, nil
 }
 
+// retainClip prepares a clip of length source frames that streams: it keeps
+// encoded, reads the loop region off its comment header, and builds the
+// filter its voices will share when its source's rate is not outputRate,
+// and decodes nothing a voice will play. Opening its reader parses the setup
+// header, so a clip whose decoder could never open is refused here rather
+// than at its first voice.
+func retainClip(encoded []byte, length int64, outputRate int) (*preparedClip, error) {
+	reader, err := oggvorbis.NewReader(bytes.NewReader(encoded))
+	if err != nil {
+		return nil, ErrNotOggVorbis{Err: err}
+	}
+	loopRegion, loopRegionErr := loopregion.Read(reader.CommentHeader().Comments, reader.SampleRate(), length)
+	clip := &preparedClip{
+		frames:        length,
+		channels:      reader.Channels(),
+		sampleRate:    reader.SampleRate(),
+		loopRegion:    loopRegion,
+		loopRegionErr: loopRegionErr,
+		encoded:       encoded,
+		openDecoder:   openOggDecoder,
+	}
+	if clip.sampleRate != outputRate {
+		clip.filter = newSincFilter(clip.sampleRate, outputRate)
+	}
+	return clip, nil
+}
+
 // Duration is the clip's true length in frames over its source's rate, as
 // the headless backend computes it, so the two report one clip identically.
 func (c *preparedClip) Duration() float32 { return float32(c.frames) / float32(c.sampleRate) }
@@ -138,10 +185,28 @@ func (c *preparedClip) LoopRegion() m.Maybe[sfx.LoopRegion] { return c.loopRegio
 // is fine or absent.
 func (c *preparedClip) LoopRegionErr() error { return c.loopRegionErr }
 
-// heldFrameAt is the frame of the clip's samples, fractional, that sounds at
-// seconds into the clip: seconds at its source's rate, scaled onto the frames
-// its samples hold, so it names the same instant whatever rate they are held
-// at, a voice's offset or its loop region's bounds among them.
-func (c *preparedClip) heldFrameAt(seconds float64) float64 {
-	return seconds * float64(c.sampleRate) * float64(len(c.samples)/c.channels) / float64(c.frames)
+// streams is whether the clip's voices each read a decoder of their own
+// through a read-ahead ring, rather than the samples it holds.
+func (c *preparedClip) streams() bool { return c.openDecoder != nil }
+
+// loopBounds is the span a looping voice repeats between, held as frames
+// frames at rate frames a second: the loop region's seconds times rate,
+// rounded and capped at frames, and the whole clip when it declares none. A
+// region sfx accepted spans at least one of its source's frames, which
+// rounds to none only where the frames are held at a far lower rate; such a
+// span would never let the playhead wrap, so it loops whole. A resident
+// voice asks it at the rate the mixer produces, of the frames its clip's
+// samples hold; a streamed voice's read-ahead at its source's rate, of its
+// source's frames, since it wraps before the conversion rather than after
+// it. Neither scales the clip's frame count.
+func (c *preparedClip) loopBounds(rate, frames float64) (start, end float64) {
+	region, declared := c.loopRegion.Get()
+	if declared {
+		start = math.Round(float64(region.Start) * rate)
+		end = min(frames, math.Round(float64(region.End)*rate))
+		if start >= 0 && start < end {
+			return start, end
+		}
+	}
+	return 0, frames
 }
