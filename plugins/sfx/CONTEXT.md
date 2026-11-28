@@ -46,6 +46,10 @@ _Avoid_: Loop point, marker, cue. Also seek, which is a game moving a voice rath
 One playing instance of a clip, begun by a play and addressed afterwards by what that play handed back. Any number may play one clip at once, and a voice that has ended is addressed by nothing.
 _Avoid_: Sound, source, channel, instance
 
+**Playhead**:
+Where a voice is in its clip. Once the clip's length is known it is never outside the clip, and a looping voice placed past its loop region is carried back by whole loops.
+_Avoid_: Position, which is a positional voice's place in space; cursor. Also offset, which is what a play or a seek asks for.
+
 **Stealing**:
 What ends a voice to make room when every slot is taken. The voice that loses is the least audible one (its own volume through its bus, its falloff and its cone) unless a priority puts it out of reach, and the play that arrives is as stealable as anything already playing. A game hears about it through the same ending that tells it about a stop. A steal is final: nothing resumes a stolen voice, and a game that wants the sound back plays it again as a new voice.
 _Avoid_: Voice limit, culling, eviction. Also ducking, which is a game lowering a bus on purpose.

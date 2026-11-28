@@ -113,11 +113,12 @@ func (t clipTable) releaseAll(k *kernel.Kernel, destroys *[]ClipID) {
 
 // installClip has backend mint the ID of prepared, the clip at path, at the
 // flush, where the destroy that pairs with it can be stated, and answers its
-// entry, ready with the clip's facts and the span a looping voice on it
-// repeats between: its loop region, or the whole clip when it declares none or
-// one the clip does not contain. That last is not distrust of the backend,
-// which drops a malformed region itself; it is that the wrap subtracts a span,
-// and a span outside the clip is a loop with no reason to stop. A backend that
+// entry, ready with the clip's facts and its bounds, in which the span a
+// looping voice repeats between is its loop region, or the whole clip when it
+// declares none or one the clip does not contain. That last is not distrust of
+// the backend, which drops a malformed region itself; it is that the wrap
+// subtracts a span, and a span outside the clip is a loop with no reason to
+// stop. A backend that
 // prepared nothing, or minted the zero ID, fails the clip with
 // ErrClipNotPrepared, and one whose Install failed with ErrClipFailed. A loop
 // region the backend dropped is logged once under the clip's loop key, as the
@@ -154,14 +155,14 @@ func installClip(k *kernel.Kernel, backend BackendSocket, path string, prepared 
 			Channels:   prepared.Channels(),
 			SampleRate: prepared.SampleRate(),
 		},
-		loopEnd: duration,
+		bounds: clipBounds{duration: duration, loopEnd: duration},
 	}
 	if region, declared := prepared.LoopRegion().Get(); declared {
 		start := convertSecondsToDuration(region.Start)
 		end := convertSecondsToDuration(region.End)
 		if start >= 0 && end > start && end <= duration {
-			entry.loopStart = start
-			entry.loopEnd = end
+			entry.bounds.loopStart = start
+			entry.bounds.loopEnd = end
 		}
 	}
 	return entry
@@ -206,10 +207,9 @@ type clipEntry struct {
 	// is matched against it then.
 	epoch uint64
 	// id is the ID the backend's Install minted, info the prepared clip's
-	// facts, and loopStart and loopEnd the span a looping voice on it
-	// repeats between, each zero until the clip is ready.
-	id        ClipID
-	info      ClipInfo
-	loopStart time.Duration
-	loopEnd   time.Duration
+	// facts, and bounds what a voice on it is fitted to, each zero until the
+	// clip is ready.
+	id     ClipID
+	info   ClipInfo
+	bounds clipBounds
 }

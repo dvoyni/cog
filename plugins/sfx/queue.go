@@ -35,6 +35,13 @@ func makeQueue(maxVoices, maxBuses int) queue {
 // the flush that applies this play, before anyone could ask about it; the
 // voice exists from that flush, silent until its clip is ready.
 //
+// A negative offset is zero. Once the clip's length is known, an offset at or
+// past the clip's end ends a one-shot with ReasonFinished, paused or not, with
+// nothing handed to the backend, and a looping voice whose offset is at or past
+// its loop end is carried back inside its loop region by whole loops, standing
+// where one that had been looping all along would. Both are read against the
+// voice's Loop after every operation of the flush that binds it.
+//
 // The clip is read through platform.FS at the flush that first names its
 // path, and shared by every voice playing it after. A voice whose clip is not
 // ready yet waits on it, addressable and stoppable, and starts from offset
@@ -82,7 +89,9 @@ func (q queue) Stop(voice Voice) {
 //
 // Changing Loop on a voice the backend already holds restarts it where it
 // stands, since looping is a fact of the voice's start at the seam: a
-// block-accurate discontinuity, as a Seek is.
+// block-accurate discontinuity, as a Seek is. A voice turned looping past its
+// loop end, in its clip's tail, is carried back inside its loop region by
+// whole loops.
 func (q queue) SetVoice(voice Voice, options VoiceOptions) {
 	if voice == NoVoice {
 		return
@@ -95,9 +104,12 @@ func (q queue) SetVoice(voice Voice, options VoiceOptions) {
 // negative offset is zero. An offset at or past the clip's end ends a
 // one-shot with ReasonFinished and moves a looping voice to its loop start,
 // not to zero, so a seek off the end of a track with an intro lands in the
-// loop. On a voice still waiting on its clip it moves where the voice will
-// start from. It is block-accurate, never sample-accurate, and a no-op on a
-// voice that no longer exists, and on NoVoice.
+// loop. One short of the clip's end but at or past the loop end, in its tail,
+// is carried back inside the loop region by whole loops. On a voice still
+// waiting on its clip it moves where the voice will start from, and the same
+// rules apply once the clip's length is known. It is block-accurate, never
+// sample-accurate, and a no-op on a voice that no longer exists, and on
+// NoVoice.
 func (q queue) Seek(voice Voice, offset time.Duration) {
 	if voice == NoVoice {
 		return

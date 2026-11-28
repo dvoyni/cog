@@ -9,7 +9,9 @@
 // whose VoiceOptions replace the fields they state, its volume, pitch, loop,
 // pause and the rest, and moves its playhead with Seek; a voice told to Loop
 // repeats over its clip's loop region, an intro running into a loop with no
-// gap, or over the whole clip when it declares none. It schedules Tasks.Flush
+// gap, or over the whole clip when it declares none. An offset past what the
+// clip holds finishes a one-shot and is carried back into a looping voice's
+// region, so no playhead is ever outside its clip. It schedules Tasks.Flush
 // on each update beat, after its recorders, which applies what was recorded,
 // advances every playhead and publishes a VoiceEndedEvent for each voice that
 // ended. It groups voices on buses it declares, under Master, moving each

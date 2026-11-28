@@ -16,7 +16,9 @@ import (
 // time read and prepared there, and a release ending the voices on its clip
 // before destroying it, and then the bus volumes, the listener and the pause
 // they coalesced to; binds the voices waiting on a clip that is now
-// ready and ends those whose clip failed; advances every playhead by delta;
+// ready, those just played among them, ending each one-shot that is past its
+// clip's end, and ends those whose clip failed; advances every playhead by
+// delta;
 // computes every live voice's params, the W3C equations against the
 // listener, its bus's volume and the pause; polls the backend's device into
 // DeviceView; hands the backend the flush's changes, restating a voice only
@@ -39,7 +41,8 @@ func flush(k *kernel.Kernel, delta time.Duration, queueHandle kernel.Write[Queue
 	for _, recorded := range queue.state.operations {
 		switch recorded.kind {
 		case operationPlay:
-			voices.start(recorded, clips.load(k, filesHandle.Get(), backend, recorded.path), &state.endings, &state.changes.Stops)
+			clips.load(k, filesHandle.Get(), backend, recorded.path)
+			voices.start(recorded, &state.endings, &state.changes.Stops)
 		case operationStop:
 			voices.stop(recorded.voice, &state.endings)
 		case operationSetVoice:

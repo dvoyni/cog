@@ -323,8 +323,17 @@ tail.
 
 `SetVoice(voice, options)` merges: each field it states replaces the voice's
 own, and an absent one leaves it as it is. `Seek(voice, offset)` moves the
-playhead, block-accurate, a negative offset being zero and one past the end
-ending a one-shot. `Stop(voice)` ends it at once, with no tail.
+playhead, block-accurate. `Stop(voice)` ends it at once, with no tail.
+
+A playhead is never outside its clip, so an offset that asks for more than the
+clip holds is settled once the clip's length is known:
+
+- a negative offset is zero;
+- a one-shot at or past the end finishes, with `ReasonFinished`, paused or not;
+- a looping voice past its loop end, by a `Play`, a `Seek` into the clip's tail
+  or `Loop` turned on, is carried back into its loop by whole loops, where one
+  that had been looping all along would be;
+- a `Seek` at or past the clip's end moves a looping voice to its loop start.
 
 ```go
 // replaySlowly plays a voice again from its start, at half its rate.

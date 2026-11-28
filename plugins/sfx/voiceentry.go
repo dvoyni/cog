@@ -14,7 +14,10 @@ type VoiceEntry struct {
 	// Playhead is where the voice is in its clip. It is flush-accurate, not
 	// sample-accurate: sfx computes it from the clip's duration, the same way
 	// it computes endings, and the device is somewhere inside its current
-	// block whenever anyone reads it.
+	// block whenever anyone reads it. It is never outside the clip, and a
+	// looping voice's is short of its loop end; while the voice waits on its
+	// clip it is the offset the play or the last seek asked for, never
+	// negative.
 	Playhead time.Duration
 	// Duration is the clip's length, zero while the voice waits on its clip.
 	Duration time.Duration

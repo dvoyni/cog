@@ -63,10 +63,12 @@ func (v liveVoices) findSlot(voice Voice) *tableSlot {
 	return slot
 }
 
-// start applies one recorded play of clip. The voice exists from here,
-// addressable and silent until its clip is ready, and then starts from its
-// offset. A play whose handle names no slot found every slot taken and
-// nothing it outranked, and ends here with ReasonStolen.
+// start applies one recorded play. The voice exists from here, addressable and
+// silent, waiting on its clip until resolve binds it, which is after every
+// operation of the flush even for a clip already ready: where it starts turns
+// on whether it loops, and a SetVoice or a Seek after the play still says so.
+// A negative offset is zero. A play whose handle names no slot found every
+// slot taken and nothing it outranked, and ends here with ReasonStolen.
 //
 // A play whose handle names a slot another voice still holds is a steal: the
 // queue chose that voice when the play was recorded, and it ends here with
@@ -74,7 +76,7 @@ func (v liveVoices) findSlot(voice Voice) *tableSlot {
 // stolen now or ended earlier in this flush, is owed its stop, appended to
 // stops here, which the backend applies before the start that takes the slot
 // over: nothing of stealing crosses the seam but an ordinary stop.
-func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedEvent, stops *[]VoiceSlot) {
+func (v liveVoices) start(play operation, endings *[]VoiceEndedEvent, stops *[]VoiceSlot) {
 	index := int(play.voice.index())
 	if index >= len(v.table.slots) {
 		*endings = append(*endings, VoiceEndedEvent{Voice: play.voice, Reason: ReasonStolen})
@@ -88,22 +90,19 @@ func (v liveVoices) start(play operation, clip clipEntry, endings *[]VoiceEndedE
 		*stops = append(*stops, VoiceSlot(index))
 	}
 	v.table.startCount++
+	offset := max(play.offset, 0)
 	*slot = tableSlot{
-		state:       slotWaiting,
-		voice:       play.voice,
-		path:        play.path,
-		bus:         play.bus,
-		offset:      play.offset,
-		options:     play.options,
-		playhead:    play.offset,
-		startNumber: v.table.startCount,
+		state:           slotWaiting,
+		playedThisFlush: true,
+		voice:           play.voice,
+		path:            play.path,
+		bus:             play.bus,
+		offset:          offset,
+		options:         play.options,
+		playhead:        offset,
+		startNumber:     v.table.startCount,
 	}
 	v.table.liveCount++
-	if clip.state == ClipReady {
-		slot.bind(clip)
-	} else {
-		slot.playedThisFlush = true
-	}
 }
 
 // stop ends voice with ReasonStopped. It is a no-op on a voice that is gone,
@@ -119,6 +118,8 @@ func (v liveVoices) stop(voice Voice, endings *[]VoiceEndedEvent) {
 // Loop restarts a voice the backend holds where it stands, since a
 // VoiceUpdate has no field for it: otherwise sfx's playhead would wrap while
 // the backend's ran out, a voice gone silent while the view says it plays.
+// Where it stands is fitted anew, so one turned looping in its clip's tail
+// restarts inside the loop.
 func (v liveVoices) set(change operation) {
 	slot := v.findSlot(change.voice)
 	if slot == nil {
@@ -129,34 +130,35 @@ func (v liveVoices) set(change operation) {
 	if change.options.Bus.Present() {
 		slot.bus = change.bus
 	}
-	if slot.looping() != wasLooping {
+	if slot.looping() != wasLooping && slot.state == slotSounding {
+		// A voice the backend holds stands short of its clip's end, so the
+		// move cannot run it out.
+		slot.moveTo(slot.playhead, false)
 		slot.restartFrom(slot.playhead)
 	}
 }
 
 // seek applies one recorded Seek, as Queue.Seek says. A voice still waiting
 // on its clip has no end to be past, and moves only the offset it will start
-// from. The end a seek is past is the clip's, not the loop's, so a looping
-// voice put down in its tail is carried back into its region by the next
-// wrap. A voice the backend holds is restarted at the new offset, which is
-// how the seam says a seek.
+// from, which bind reads as a seek's. A voice the backend holds is restarted
+// where the seek put it, which is how the seam says a seek.
 func (v liveVoices) seek(voice Voice, offset time.Duration, endings *[]VoiceEndedEvent) {
 	slot := v.findSlot(voice)
 	if slot == nil {
 		return
 	}
 	offset = max(offset, 0)
-	if slot.state != slotWaiting && offset >= slot.duration {
-		if !slot.looping() {
-			slot.playhead = slot.duration
-			v.end(slot, ReasonFinished, endings)
-			return
-		}
-		offset = slot.loopStart
+	if slot.state == slotWaiting {
+		slot.offset = offset
+		slot.playhead = offset
+		slot.offsetFromSeek = true
+		return
 	}
-	slot.offset = offset
-	slot.playhead = offset
-	slot.restartFrom(offset)
+	if slot.moveTo(offset, true) {
+		v.end(slot, ReasonFinished, endings)
+		return
+	}
+	slot.restartFrom(slot.playhead)
 }
 
 // stopBus ends every live voice on bus with ReasonStopped, as a Stop naming
@@ -203,11 +205,13 @@ func (v liveVoices) restate() {
 	}
 }
 
-// resolve binds each voice waiting on a clip that clips now holds ready, and
-// ends with ReasonFailed each whose clip has failed, unless its play was
-// applied in this flush: a failure ends a voice one or more flushes after its
-// play and never in the same one, so a game cannot write "play it, and if it
-// fails this frame, do X".
+// resolve binds each voice waiting on a clip that clips now holds ready, one
+// played in this flush included, and ends with ReasonFinished each one-shot
+// whose offset is at or past its clip's end. It ends with ReasonFailed each
+// voice whose clip has failed, unless its play was applied in this flush: a
+// failure ends a voice one or more flushes after its play and never in the
+// same one, so a game cannot write "play it, and if it fails this frame, do
+// X".
 func (v liveVoices) resolve(clips clipTable, endings *[]VoiceEndedEvent) {
 	for index := range v.table.slots {
 		slot := &v.table.slots[index]
@@ -218,7 +222,9 @@ func (v liveVoices) resolve(clips clipTable, endings *[]VoiceEndedEvent) {
 		slot.playedThisFlush = false
 		switch clip := clips.state.entries[slot.path]; clip.state {
 		case ClipReady:
-			slot.bind(clip)
+			if slot.bind(clip) {
+				v.end(slot, ReasonFinished, endings)
+			}
 		case ClipFailed:
 			if !playedThisFlush {
 				v.end(slot, ReasonFailed, endings)
@@ -235,19 +241,17 @@ func (v liveVoices) resolve(clips clipTable, endings *[]VoiceEndedEvent) {
 // instead, and never ends by itself. A voice waiting on its clip does not
 // advance: it starts from its offset once the clip is ready, with no catch-up.
 // A suspended voice does not advance either, so it resumes on the same sample.
+// The offset of a start owed in this flush stays where it was.
 func (v liveVoices) advance(delta time.Duration, endings *[]VoiceEndedEvent) {
 	for index := range v.table.slots {
 		slot := &v.table.slots[index]
 		if slot.state != slotStarting && slot.state != slotSounding || slot.suspended(v.table.paused) {
 			continue
 		}
-		slot.playhead += time.Duration(float64(delta) * float64(max(slot.options.Pitch.Or(1), 0)))
-		if slot.looping() {
-			slot.wrap()
-			continue
-		}
-		if slot.playhead >= slot.duration {
-			slot.playhead = slot.duration
+		moved := slot.playhead + time.Duration(float64(delta)*float64(max(slot.options.Pitch.Or(1), 0)))
+		playhead, ranOut := slot.bounds.fit(moved, slot.looping())
+		slot.playhead = playhead
+		if ranOut {
 			v.end(slot, ReasonFinished, endings)
 		}
 	}
@@ -377,9 +381,14 @@ type tableSlot struct {
 	bus             Bus
 	// offset is where in the clip the backend's next start of the voice
 	// begins it: where its play began it, until a seek, a change of Loop or
-	// a restart moves it. playhead is where the voice is.
+	// a restart moves it. playhead is where the voice is. Both are what the
+	// game asked for while the voice waits on its clip, and inside the clip
+	// once it is bound.
 	offset   time.Duration
 	playhead time.Duration
+	// offsetFromSeek is whether the offset of a voice waiting on its clip was
+	// a seek's, which moveTo reads by seek's rule once the clip is bound.
+	offsetFromSeek bool
 	// options is what the voice is set to now: how it was played, with every
 	// SetVoice merged in.
 	options VoiceOptions
@@ -392,15 +401,11 @@ type tableSlot struct {
 	// rather than flushes, since two voices played before one flush at one
 	// position tie on every other term exactly.
 	startNumber uint64
-	// clipID, duration and channels are the clip's, zero while the voice
-	// waits on it, and loopStart and loopEnd the span a looping voice repeats
-	// between: the clip's loop region, or the whole clip when it declares
-	// none or one the clip does not contain.
-	clipID    ClipID
-	duration  time.Duration
-	channels  int
-	loopStart time.Duration
-	loopEnd   time.Duration
+	// clipID, bounds and channels are the clip's, zero while the voice waits
+	// on it.
+	clipID   ClipID
+	bounds   clipBounds
+	channels int
 	// distance is how far the voice is from the listener, zero on a
 	// non-positional voice, and audibility the scalar it is heard at before
 	// panning, its falloff, its cone, its own volume and its bus's, as of the
@@ -422,7 +427,7 @@ func (s *tableSlot) makeVoiceEntry(paused bool) VoiceEntry {
 		Path:       s.path,
 		Bus:        s.bus,
 		Playhead:   s.playhead,
-		Duration:   s.duration,
+		Duration:   s.bounds.duration,
 		Options:    s.options,
 		Paused:     s.suspended(paused),
 		Audibility: s.audibility,
@@ -456,25 +461,24 @@ func (s *tableSlot) computeParams(listenerAt, front, up m.Vec3, busVolume float3
 }
 
 // looping answers whether the voice repeats rather than ending. Where it
-// repeats is its clip's to say: loopStart and loopEnd.
+// repeats is its clip's to say: bounds.
 func (s *tableSlot) looping() bool { return s.options.Loop.Or(false) }
 
-// wrap brings a looping voice's playhead past its loop end back inside its
-// loop region, by whole spans, so a rate that overshoots by several spans in
-// one flush still lands inside it. A playhead short of the loop end is the
-// intro or the loop itself, and neither is a wrap: a looping voice starts at
-// the head of its clip and runs into its loop, carried forwards into it and
-// never lifted up to it.
-func (s *tableSlot) wrap() {
-	if s.playhead < s.loopEnd {
-		return
+// moveTo puts the voice, bound to its clip, at offset, where the backend's
+// next start of it begins too, and answers whether it is a one-shot that has
+// run out. The offset is fitted to the clip, after seek's one rule of its own,
+// when fromSeek: a looping voice sought to its clip's end or past it goes to
+// the loop start, so a seek off the end of a track with an intro lands in the
+// loop. The end such a seek is past is the clip's, not the loop's, so one into
+// the tail is fitted as any other offset is.
+func (s *tableSlot) moveTo(offset time.Duration, fromSeek bool) bool {
+	if fromSeek && s.looping() && offset >= s.bounds.duration {
+		offset = s.bounds.loopStart
 	}
-	span := s.loopEnd - s.loopStart
-	if span <= 0 {
-		s.playhead = s.loopStart
-		return
-	}
-	s.playhead = s.loopStart + (s.playhead-s.loopStart)%span
+	playhead, ranOut := s.bounds.fit(offset, s.looping())
+	s.offset = playhead
+	s.playhead = playhead
+	return ranOut
 }
 
 // restartFrom owes the backend a restart of the voice at offset, when it
@@ -494,15 +498,14 @@ func (s *tableSlot) suspended(paused bool) bool {
 }
 
 // bind attaches the ready clip to the voice in the slot, which was waiting on
-// it, and owes the backend its start. The voice starts from its offset, with
-// no catch-up however long it waited: a 300 ms load must not play a
-// footstep's tail.
-func (s *tableSlot) bind(clip clipEntry) {
+// it, owes the backend its start, and answers whether it is a one-shot that
+// has run out before it began. The voice starts from its offset, with no
+// catch-up however long it waited: a 300 ms load must not play a footstep's
+// tail.
+func (s *tableSlot) bind(clip clipEntry) bool {
 	s.state = slotStarting
 	s.clipID = clip.id
-	s.duration = clip.info.Duration
+	s.bounds = clip.bounds
 	s.channels = clip.info.Channels
-	s.playhead = s.offset
-	s.loopStart = clip.loopStart
-	s.loopEnd = clip.loopEnd
+	return s.moveTo(s.offset, s.offsetFromSeek)
 }
